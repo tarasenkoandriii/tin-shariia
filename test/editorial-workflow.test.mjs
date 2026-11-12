@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
+import { strFromU8, unzipSync } from 'fflate';
 import { registerVideo, importTranscript } from '../src/db/editorial-import.mjs';
 import { database } from '../src/db/runtime.mjs';
 import { loadWorkflow } from '../src/db/editorial-workflow.mjs';
+import { publicationPackage } from '../src/db/publications.mjs';
+import { packageZip } from '../src/editorial/publication-zip.mjs';
 import { editorialMutation } from '../src/http/editorial-workflow.mjs';
 
 const origin='https://editorial.example.test';
@@ -16,7 +19,7 @@ test('editorial HTTP workflow enforces revisions, independent approvals and evid
     if (!native) for (const filename of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0004_publication_records']) {
       await db.exec(await readFile(new URL('../drizzle/'+filename+'.sql',import.meta.url),'utf8'));
     }
-    for (const [identity, roles] of [['writer',['author','factchecker','editor']],['checker',['factchecker']],['editor',['editor']],['admin',['admin']]]) {
+    for (const [identity, roles] of [['writer',['author','factchecker','editor']],['checker',['factchecker']],['editor',['editor']],['publisher',['publisher']],['admin',['admin']]]) {
       const {rows:[{id}]}=await db.query('INSERT INTO members (clerk_user_id,email) VALUES ($1,$2) RETURNING id',[identity,identity+'@example.test']);
       await db.query('INSERT INTO member_roles SELECT $1, unnest($2::text[])',[id,roles]);
     }
@@ -81,6 +84,11 @@ test('editorial HTTP workflow enforces revisions, independent approvals and evid
     episode=take(await change('episodes','writer',episode,'edit',{...script,claimVersion:claim.version}));
     episode=take(await change('episodes','writer',episode,'submit'));
     episode=take(await change('episodes','editor',episode,'approve'));
+    const snapshot=await publicationPackage(db,'publisher',episode.id,episode.version);
+    const archive=unzipSync(packageZip(snapshot));
+    assert.equal(JSON.parse(strFromU8(archive['manifest.json'])).episodeVersion,episode.version);
+    assert.equal(strFromU8(archive['script.txt']).trim(),snapshot.episode.script);
+    assert.equal(JSON.parse(strFromU8(archive['sources.json'])).length,1);
     const done=await loadWorkflow(db,'writer',video.id);
     assert.equal(done.episodes[0].stale,false);
     assert.equal(done.episodes[0].version,2);

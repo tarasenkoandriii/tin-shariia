@@ -45,4 +45,8 @@ jobs:
           docker exec ${{ job.services.postgres.id }} createdb -U postgres workflow_test
           npm run db:migrate
           node --test test/editorial-workflow.test.mjs test/analysis-queue.test.mjs test/publications.test.mjs test/montage.test.mjs
+          docker exec ${{ job.services.postgres.id }} pg_dump -U postgres --format=custom --no-owner --no-acl workflow_test > /tmp/workflow-test.dump
+          docker exec ${{ job.services.postgres.id }} createdb -U postgres workflow_restore
+          docker exec -i ${{ job.services.postgres.id }} pg_restore -U postgres --exit-on-error --no-owner --no-acl -d workflow_restore < /tmp/workflow-test.dump
+          docker exec ${{ job.services.postgres.id }} psql -U postgres -d workflow_restore -v ON_ERROR_STOP=1 -Atc "SELECT CASE WHEN count(*) > 0 THEN 'restore-ok' ELSE 'restore-empty' END FROM episodes"
       - run: npm run build
