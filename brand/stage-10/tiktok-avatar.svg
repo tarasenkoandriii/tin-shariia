@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <rect width="800" height="800" rx="400" fill="#101720"/>
+  <circle cx="400" cy="400" r="350" fill="none" stroke="#53D6C2" stroke-width="18"/>
+  <text x="400" y="355" text-anchor="middle" fill="#F5F7FA" font-family="Arial,sans-serif" font-size="164" font-weight="700">ТШ</text>
+  <rect x="250" y="415" width="300" height="12" rx="6" fill="#F4B860"/>
+  <text x="400" y="510" text-anchor="middle" fill="#B7C3CF" font-family="Arial,sans-serif" font-size="38" font-weight="700" letter-spacing="6">АНАЛІЗ</text>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.9" y2="1"><stop stop-color="#101720"/><stop offset="1" stop-color="#243342"/></linearGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="#ffffff" stroke-opacity=".045"/></pattern>
+  </defs>
+  <rect width="1080" height="1920" fill="url(#bg)"/><rect width="1080" height="1920" fill="url(#grid)"/>
+  <rect x="76" y="330" width="12" height="870" rx="6" fill="#53D6C2"/>
+  <text x="132" y="420" fill="#53D6C2" font-family="Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="3">ТІНЬ ШАРІЯ · КОРОТКО</text>
+  <text x="132" y="620" fill="#F5F7FA" font-family="Arial,sans-serif" font-size="88" font-weight="700">ОДНА ТЕЗА.</text>
+  <text x="132" y="730" fill="#F5F7FA" font-family="Arial,sans-serif" font-size="88" font-weight="700">ТРИ ПЕРЕВІРКИ.</text>
+  <rect x="132" y="790" width="610" height="5" fill="#F4B860"/>
+  <text x="132" y="875" fill="#B7C3CF" font-family="Arial,sans-serif" font-size="38">Демонстраційна фраза —</text>
+  <text x="132" y="925" fill="#B7C3CF" font-family="Arial,sans-serif" font-size="38">не готовий висновок.</text>
+  <rect x="132" y="1010" width="810" height="260" rx="22" fill="#1B2733" stroke="#53D6C2" stroke-opacity=".6" stroke-width="3"/>
+  <text x="178" y="1095" fill="#53D6C2" font-family="Arial,sans-serif" font-size="28" font-weight="700">КОНТЕКСТ</text>
+  <text x="178" y="1160" fill="#F5F7FA" font-family="Arial,sans-serif" font-size="34">Тут коротко пояснюємо, що саме</text>
+  <text x="178" y="1210" fill="#F5F7FA" font-family="Arial,sans-serif" font-size="34">підтверджує джерело.</text>
+  <text x="132" y="1390" fill="#91A1B0" font-family="Arial,sans-serif" font-size="26">ДЖЕРЕЛО: ДОДАТИ ПЕРЕВІРЕНЕ ПОСИЛАННЯ</text>
+  <text x="132" y="1540" fill="#91A1B0" font-family="Arial,sans-serif" font-size="24">МАКЕТ 9:16 · SAFE ZONE ПЕРЕВІРИТИ В ПЛАТФОРМІ</text>
+</svg>

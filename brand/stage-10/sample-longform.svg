@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#101720"/><stop offset="1" stop-color="#243342"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity=".04"/></pattern>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/><rect width="1280" height="720" fill="url(#grid)"/>
+  <rect x="64" y="68" width="10" height="584" rx="5" fill="#53D6C2"/>
+  <text x="104" y="116" fill="#53D6C2" font-family="Arial,sans-serif" font-size="24" font-weight="700" letter-spacing="3">ТІНЬ ШАРІЯ · РОЗБІР</text>
+  <text x="104" y="270" fill="#F5F7FA" font-family="Arial,sans-serif" font-size="64" font-weight="700">ЩО ПОКАЗУЮТЬ</text>
+  <text x="104" y="346" fill="#F5F7FA" font-family="Arial,sans-serif" font-size="64" font-weight="700">ДОКУМЕНТИ?</text>
+  <rect x="104" y="398" width="478" height="3" fill="#F4B860"/>
+  <text x="104" y="450" fill="#B7C3CF" font-family="Arial,sans-serif" font-size="27">Демонстраційний заголовок · замінити після фактчеку</text>
+  <rect x="866" y="176" width="300" height="354" rx="18" fill="#1B2733" stroke="#53D6C2" stroke-opacity=".6" stroke-width="2"/>
+  <path d="M916 256h200M916 296h168M916 336h185M916 376h130" stroke="#9EABB8" stroke-width="9" stroke-linecap="round" opacity=".62"/>
+  <rect x="916" y="430" width="112" height="42" rx="21" fill="#53D6C2"/>
+  <text x="972" y="458" text-anchor="middle" fill="#101720" font-family="Arial,sans-serif" font-size="18" font-weight="700">ДЖЕРЕЛО</text>
+  <text x="104" y="620" fill="#91A1B0" font-family="Arial,sans-serif" font-size="20">МАКЕТ · ПЕРЕВІРИТИ ДЖЕРЕЛА Й КОНТЕКСТ ДО ПУБЛІКАЦІЇ</text>
+</svg>

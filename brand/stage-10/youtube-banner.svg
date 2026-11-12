@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1440" viewBox="0 0 2560 1440">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#101720"/><stop offset="1" stop-color="#243342"/></linearGradient>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse"><path d="M64 0H0V64" fill="none" stroke="#fff" stroke-opacity=".035"/></pattern>
+  </defs>
+  <rect width="2560" height="1440" fill="url(#bg)"/><rect width="2560" height="1440" fill="url(#grid)"/>
+  <circle cx="2160" cy="270" r="330" fill="#53D6C2" opacity=".08"/>
+  <circle cx="380" cy="1160" r="360" fill="#F4B860" opacity=".06"/>
+  <!-- YouTube central safe area: 1546 × 423, centered -->
+  <g transform="translate(507 508)">
+    <rect x="0" y="28" width="12" height="335" rx="6" fill="#53D6C2"/>
+    <text x="54" y="122" fill="#53D6C2" font-family="Arial,sans-serif" font-size="30" font-weight="700" letter-spacing="5">РЕДАКЦІЙНИЙ ПРОЄКТ</text>
+    <text x="54" y="228" fill="#F5F7FA" font-family="Arial,sans-serif" font-size="82" font-weight="700" letter-spacing="1">ТІНЬ ШАРІЯ</text>
+    <text x="58" y="300" fill="#B7C3CF" font-family="Arial,sans-serif" font-size="34">Аналіз · документи · контекст</text>
+    <rect x="1210" y="102" width="260" height="160" rx="26" fill="#1B2733" stroke="#53D6C2" stroke-opacity=".6" stroke-width="3"/>
+    <path d="M1260 151h158M1260 183h132M1260 215h146" stroke="#91A1B0" stroke-width="8" stroke-linecap="round"/>
+  </g>
+</svg>
