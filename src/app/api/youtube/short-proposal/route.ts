@@ -51,7 +51,18 @@ export async function POST(request: Request) {
       const spent = (error as {spentMicros?:number})?.spentMicros;
       await settleShortsProposal(db,reservation.id,spent === undefined
         ? {state:'unknown'} : {state:'failed',spent});
-      if (spent === undefined) throw Error('SHORTS_PROPOSAL_UNKNOWN');
+      if (spent === undefined) {
+        const status = (error as { status?: unknown })?.status;
+        const name = error instanceof Error ? error.name : '';
+        const code = status === 400 ? 'YOUTUBE_ANALYSIS_REQUEST_REJECTED'
+          : status === 401 || status === 403 ? 'YOUTUBE_ANALYSIS_ACCESS_DENIED'
+          : status === 404 ? 'YOUTUBE_ANALYSIS_RESOURCE_UNAVAILABLE'
+          : status === 429 ? 'YOUTUBE_ANALYSIS_QUOTA'
+          : name === 'TimeoutError' || name === 'AbortError' ? 'YOUTUBE_ANALYSIS_TIMEOUT'
+          : 'SHORTS_PROPOSAL_UNKNOWN';
+        console.warn('YOUTUBE_SHORT_PROPOSAL_FAILED', { code, providerStatus: typeof status === 'number' ? status : null });
+        throw Error(code);
+      }
       throw error;
     }
   } catch (error) { return publicationError(error); }
