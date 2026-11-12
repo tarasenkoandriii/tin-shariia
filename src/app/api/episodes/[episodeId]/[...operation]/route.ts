@@ -2,6 +2,7 @@ import {after} from 'next/server';
 import { analysisConfig } from '../../../../../analysis/config.mjs';
 import { enqueueVideoAudit } from '../../../../../analysis/queue.mjs';
 import { videoAuditStatus } from '../../../../../analysis/video-status.mjs';
+import { reviewVideoAudit } from '../../../../../db/video-audit.mjs';
 import { dispatchSources } from '../../../../../workflows/dispatch';
 import { privateHeaders, publicationError, publicationIdentity, publicationInput, publicationReply } from '../../../../../access/publication-http';
 import { database } from '../../../../../db/runtime.mjs';
@@ -53,6 +54,9 @@ export async function POST(request:Request,{params}:Context){
       const identity=await publicationIdentity(request);
       if(process.env.VIDEO_AUDIT_ENABLED!=='true') throw Error('VIDEO_AUDIT_DISABLED');
       const input=await publicationInput(request);
+      if(input.action==='finding'||input.action==='approve'){
+        return publicationReply(await reviewVideoAudit(await database(),identity,episodeId,operation[1],input));
+      }
       if(input.confirmed!==true||(input.retry!==undefined&&typeof input.retry!=='boolean')
         ||(input.acknowledgeUnknown!==undefined&&typeof input.acknowledgeUnknown!=='boolean')) throw Error('INVALID_INPUT');
       const result=await enqueueVideoAudit(await database(),identity,episodeId,operation[1],input,analysisConfig());

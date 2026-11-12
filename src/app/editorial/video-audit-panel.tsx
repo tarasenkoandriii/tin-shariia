@@ -7,9 +7,9 @@ type Finding={
   sourceIndex:number|null; observation:string; fix:string;
 };
 type Report={
-  attempt:number; summary:string; completedAt:string;
+  attempt:number; summary:string; completedAt:string; reviewedAt:string|null; reviewedByMe:boolean;
   coverage:{interval:number;startMs:number;endMs:number;audio:string;visual:string}[];
-  findings:Finding[];
+  findings:{finding:Finding;position:number;review:{disposition:string;comment:string}|null}[];
 };
 type Job={
   id:string; attempt:number; owned:boolean; status:string; error_code:string|null; model:string; reports:Report[];
@@ -29,6 +29,11 @@ const messages:Record<string,string>={
   VIDEO_PROVIDER_TIMEOUT:'Gemini не повернув результат вчасно.',
   PROVIDER_OUTCOME_UNKNOWN:'Зв’язок обірвався. Резерв збережено до звірки.',
   PROVIDER_USAGE_UNKNOWN:'Дані про витрати відсутні. Резерв збережено.',
+  FINDINGS_OPEN:'Спершу закрийте кожне зауваження коментарем редактора.',
+  AUDIT_REQUIRED:'Для цієї ревізії ще немає успішного аудиту Gemini.',
+  RELEASE_APPROVAL_REQUIRED:'Публікацію можна зареєструвати лише для окремо допущеної ревізії монтажу.',
+  INVALID_INPUT:'Перевірте заповнення форми.',
+  FORBIDDEN:'Для цієї дії потрібна роль редактора.',
 };
 const categories:Record<string,string>={
   speech:'Розбірливість',pronunciation:'Вимова',pauses:'Паузи',overlap:'Накладання голосів',music:'Музика',
@@ -38,7 +43,7 @@ const categories:Record<string,string>={
 const severities:Record<string,string>={critical:'Критичне',major:'Суттєве',minor:'Незначне'};
 const seconds=(ms:number)=>new Intl.NumberFormat('uk-UA',{maximumFractionDigits:3}).format(ms/1000)+' с';
 
-export function VideoAuditPanel({endpoint,canRun}:{endpoint:string;canRun:boolean}){
+export function VideoAuditPanel({endpoint,canRun,canReview}:{endpoint:string;canRun:boolean;canReview:boolean}){
   const [jobs,setJobs]=useState<Job[]>([]);
   const [message,setMessage]=useState('');
   const [pending,setPending]=useState(false);
@@ -73,6 +78,21 @@ export function VideoAuditPanel({endpoint,canRun}:{endpoint:string;canRun:boolea
     finally{setPending(false);}
   }
 
+  async function review(input:Record<string,unknown>){
+    if(pending) return;
+    setPending(true);setMessage('');
+    try{
+      const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input)});
+      const result=await response.json();
+      if(!response.ok) throw Error(result.error?.code);
+      const refreshed=await fetch(endpoint,{cache:'no-store'});
+      if(!refreshed.ok) throw Error('AUDIT_LIST_FAILED');
+      setJobs((await refreshed.json()).data);
+      setMessage(input.action==='approve'?'Ревізію монтажу допущено до реєстрації публікації.':'Рішення редактора збережено.');
+    }catch(error){setMessage(messages[(error as Error).message]??'Не вдалося зберегти рішення редактора.');}
+    finally{setPending(false);}
+  }
+
   return <details><summary>Аудит відео та звуку Gemini</summary>
     {canRun&&jobs.length===0&&<form onSubmit={event=>{event.preventDefault();void run({});}}>
       <label><input type="checkbox" required /> Передати цей MP4 і пакет сценарію Gemini в межах спільного бюджету.</label>
@@ -99,13 +119,24 @@ export function VideoAuditPanel({endpoint,canRun}:{endpoint:string;canRun:boolea
           <strong>{seconds(row.startMs)} – {seconds(row.endMs)}</strong>
           <p>Звук: {row.audio}</p><p>Відеоряд: {row.visual}</p>
         </li>)}</ul>
-        {report.findings.length===0?<p>Gemini не запропонував зауважень.</p>:<ol>{report.findings.map((finding,index)=><li key={index}>
+        {report.reviewedAt&&<p>Ревізію допущено редактором · {new Intl.DateTimeFormat('uk-UA',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Kyiv'}).format(new Date(report.reviewedAt))}</p>}
+        {report.findings.length===0?<p>Gemini не запропонував зауважень.</p>:<ol>{report.findings.map(({finding,position,review:decision})=><li key={position}>
           <strong>{severities[finding.severity]} · {categories[finding.category]}</strong>
           <p>{finding.startMs!==null&&finding.endMs!==null?
             seconds(finding.startMs)+' – '+seconds(finding.endMs):finding.field}
           {finding.sourceIndex!==null&&' · джерело '+(finding.sourceIndex+1)}</p>
           <p>{finding.observation}</p><p>Запропонована правка: {finding.fix}</p>
+          {decision?<p><strong>{decision.disposition==='resolved'?'Виправлено':'Прийнято редактором'}:</strong> {decision.comment}</p>:canReview&&report.attempt===job.attempt&&<form onSubmit={event=>{
+            event.preventDefault();const form=new FormData(event.currentTarget);
+            void review({action:'finding',attempt:report.attempt,position,disposition:form.get('disposition'),comment:form.get('comment')});
+          }}>
+            <label>Рішення редактора <select name="disposition"><option value="resolved">Виправлено</option><option value="accepted">Прийнято без правки</option></select></label>
+            <label>Коментар та обґрунтування <textarea name="comment" minLength={1} maxLength={4000} required /></label>
+            <button disabled={pending}>Зберегти рішення</button>
+          </form>}
         </li>)}</ol>}
+        {canReview&&report.attempt===job.attempt&&job.status==='succeeded'&&!report.reviewedAt&&<button disabled={pending}
+          onClick={()=>void review({action:'approve'})}>Допустити цю ревізію до публікації</button>}
       </details>)}
     </article>)}
   </details>;

@@ -11,7 +11,7 @@ type Report={
 };
 export type Montage={
   id:string; episode_id:string; episode_version:number; ordinal:number; state:string; owned:boolean;
-  expected_bytes:number; expires_at:string; sha256:string|null; report:Report|null; error_code:string|null;
+  expected_bytes:number; expires_at:string; sha256:string|null; report:Report|null; error_code:string|null; release_approved:boolean;
 };
 const states:Record<string,string>={
   uploading:'Очікує підтвердження завантаження',queued:'У черзі',checking:'Перевіряється',
@@ -43,7 +43,7 @@ async function post<T>(path:string,body?:object):Promise<T>{
   return json.data;
 }
 
-export function MontagePanel({episode,items,canUpload}:{episode:Episode;items:Montage[];canUpload:boolean}){
+export function MontagePanel({episode,items,canUpload,canReview}:{episode:Episode;items:Montage[];canUpload:boolean;canReview:boolean}){
   const router=useRouter();
   const [message,setMessage]=useState('');
   const [busy,setBusy]=useState(false);
@@ -99,7 +99,7 @@ export function MontagePanel({episode,items,canUpload}:{episode:Episode;items:Mo
         </li>)}</ul>:<p>Пауз понад 0,5 с нижче −45 дБ не виявлено.</p>}
         {item.sha256&&<p>SHA-256 <code>{item.sha256}</code></p>}
       </details>}
-      {item.sha256&&<VideoAuditPanel endpoint={base+'/'+item.id+'/audits'}
+      {item.sha256&&<VideoAuditPanel endpoint={base+'/'+item.id+'/audits'} canReview={canReview}
         canRun={canUpload&&item.state==='passed'&&item.episode_version===episode.version} />}
     </li>)}</ol>}
   </section>;

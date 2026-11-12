@@ -8,6 +8,7 @@ import type { Claim, Evidence, Episode, Transcript } from './workflow-types';
 
 const messages: Record<string, string> = {
   APPROVAL_REQUIRED: "Потрібен погоджений сценарій цієї версії.",
+  RELEASE_APPROVAL_REQUIRED: 'Спершу потрібен аудит Gemini та явний допуск цієї ревізії монтажу редактором.',
   PUBLICATION_CONFLICT: "Цей випуск або YouTube-ролик уже зареєстровано з іншими даними.",
   METRIC_TOO_EARLY: "Заміри доступні після завершення відповідного періоду.",
   METRIC_CONFLICT: "Заміри вже містять новіші або інші дані за цей час.",

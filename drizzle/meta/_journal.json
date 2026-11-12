@@ -50,6 +50,13 @@
       "when": 1794441600006,
       "tag": "0006_video_audits",
       "breakpoints": false
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794441600007,
+      "tag": "0007_video_release_approval",
+      "breakpoints": false
     }
   ]
 }

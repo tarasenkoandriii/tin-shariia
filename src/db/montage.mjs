@@ -85,8 +85,13 @@ export async function listMontage(db,identity,videoId){
   const member=await memberFor(db,identity);
   const {rows}=await db.query(`SELECT m.id,m.episode_id,m.episode_version,m.ordinal,m.expected_bytes,m.created_at,
     m.expires_at,m.sha256,m.report,m.error_code,m.uploaded_by=$2 AS owned,
+    (latest.reviewed_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM audit_findings f LEFT JOIN audit_finding_reviews r USING(job_id,attempt,position)
+      WHERE f.job_id=latest.id AND f.attempt=latest.attempt AND r.job_id IS NULL)) AS release_approved,
     CASE WHEN m.expires_at<=now() OR (m.state='uploading' AND m.upload_until<=now()) THEN 'expired' ELSE m.state END AS state
     FROM episode_media_revisions m JOIN episodes e ON e.id=m.episode_id JOIN claims c ON c.id=e.claim_id
+    LEFT JOIN LATERAL (SELECT j.id,j.attempt,a.reviewed_at FROM ai_jobs j JOIN prepublication_audits a
+      ON a.job_id=j.id AND a.attempt=j.attempt WHERE j.media_revision_id=m.id AND j.mode='video' AND j.status='succeeded'
+      ORDER BY a.completed_at DESC,j.created_at DESC,j.id DESC LIMIT 1) latest ON true
     WHERE c.video_id=$1 ORDER BY m.ordinal DESC LIMIT 100`,[uuid(videoId),member.id]);
   return rows;
 }

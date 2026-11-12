@@ -63,24 +63,38 @@ export function registerPublication(db,identity,episodeId,input){
     const when=timestamp(input.publishedAt);
     const {rows:[episode]}=await tx.query('SELECT * FROM episodes WHERE id=$1 FOR UPDATE',[uuid(episodeId)]);
     if(!episode) throw Error('NOT_FOUND');
+    const snapshot=await packageFor(tx,episode,input.version);
+    const mediaRevisionId=uuid(input.mediaRevisionId);
     const {rows:[existing]}=await tx.query(
-      `SELECT id,episode_id,episode_version,youtube_id,published_at FROM publications
+      `SELECT id,episode_id,episode_version,media_revision_id,youtube_id,published_at FROM publications
        WHERE episode_id=$1 OR youtube_id=$2 ORDER BY (episode_id=$1) DESC LIMIT 1`,[episodeId,youtube.youtubeId],
     );
     if(existing){
       if(existing.episode_id===episodeId&&existing.youtube_id===youtube.youtubeId&&existing.episode_version===input.version
-        &&new Date(existing.published_at).toISOString()===when) return {...existing,deduplicated:true};
+        &&existing.media_revision_id===mediaRevisionId&&new Date(existing.published_at).toISOString()===when) return {...existing,deduplicated:true};
       throw Error('PUBLICATION_CONFLICT');
     }
-    const snapshot=await packageFor(tx,episode,input.version);
+    const {rows:[release]}=await tx.query(`SELECT m.id,m.episode_version,m.sha256,m.state,m.snapshot,m.expires_at,latest.reviewed_at
+      FROM episode_media_revisions m JOIN LATERAL (
+        SELECT j.id,j.attempt,a.reviewed_at FROM ai_jobs j JOIN prepublication_audits a ON a.job_id=j.id AND a.attempt=j.attempt
+        WHERE j.media_revision_id=m.id AND j.mode='video' AND j.status='succeeded'
+        ORDER BY a.completed_at DESC,j.created_at DESC,j.id DESC LIMIT 1
+      ) latest ON true JOIN prepublication_audits a ON a.job_id=latest.id AND a.attempt=latest.attempt
+      JOIN ai_jobs j ON j.id=latest.id AND j.attempt=latest.attempt
+      WHERE m.id=$1 AND m.episode_id=$2 AND m.state='passed' AND m.episode_version=$3
+        AND latest.reviewed_at IS NOT NULL AND m.expires_at>now()
+        AND NOT EXISTS(SELECT 1 FROM audit_findings f LEFT JOIN audit_finding_reviews r USING(job_id,attempt,position)
+          WHERE f.job_id=latest.id AND f.attempt=latest.attempt AND r.job_id IS NULL)
+      FOR SHARE OF m,a,j`,[mediaRevisionId,episodeId,input.version]);
+    if(!release) throw Error('RELEASE_APPROVAL_REQUIRED');
     const {rows:[created]}=await tx.query(
-      `INSERT INTO publications (episode_id,episode_version,youtube_id,published_at,recorded_by,snapshot)
-       VALUES ($1,$2,$3,$4,$5,$6::text::jsonb) ON CONFLICT DO NOTHING
-       RETURNING id,episode_id,episode_version,youtube_id,published_at`,
-      [episode.id,input.version,youtube.youtubeId,when,member.id,json(snapshot)],
+      `INSERT INTO publications (episode_id,episode_version,media_revision_id,youtube_id,published_at,recorded_by,snapshot)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::text::jsonb) ON CONFLICT DO NOTHING
+       RETURNING id,episode_id,episode_version,media_revision_id,youtube_id,published_at`,
+      [episode.id,input.version,mediaRevisionId,youtube.youtubeId,when,member.id,json(snapshot)],
     );
     if(!created) throw Error('PUBLICATION_CONFLICT');
-    await event(tx,created.id,member.id,'register',{version:input.version,youtubeId:youtube.youtubeId});
+    await event(tx,created.id,member.id,'register',{version:input.version,youtubeId:youtube.youtubeId,mediaRevisionId});
     return {...created,deduplicated:false};
   });
 }
@@ -156,7 +170,8 @@ export function changeCorrection(db,identity,publicationId,input){
 
 export async function loadPublications(db,identity,videoId){
   await memberWith(db,identity);
-  const {rows}=await db.query(`SELECT p.id,p.episode_id,p.episode_version,p.youtube_id,p.published_at,
+  const {rows}=await db.query(`SELECT p.id,p.episode_id,p.episode_version,p.media_revision_id,p.youtube_id,p.published_at,
+    (SELECT m.ordinal FROM episode_media_revisions m WHERE m.id=p.media_revision_id) AS media_ordinal,
     COALESCE((SELECT jsonb_agg(to_jsonb(m) ORDER BY m.day) FROM metric_snapshots m WHERE m.publication_id=p.id),'[]'::jsonb) AS metrics,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('id',co.id,'status',co.status,'revision',co.revision,
       'kind',co.kind,'original',co.original,'replacement',co.replacement,'reason',co.reason,

@@ -8,8 +8,10 @@ import { registerVideo } from '../src/db/editorial-import.mjs';
 import { changeEditorial } from '../src/db/editorial-workflow.mjs';
 import { changeCorrection, loadPublications, publicationPackage, recordMetrics, registerPublication } from '../src/db/publications.mjs';
 import { packageZip } from '../src/editorial/publication-zip.mjs';
+import { reviewVideoAudit } from '../src/db/video-audit.mjs';
 
-const sql=['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0004_publication_records'];
+const sql=['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue',
+  '0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval'];
 const time=days=>new Date(Date.now()-days*86400000).toISOString();
 
 test('publication requires a current approval and freezes the package, metrics and corrections',async()=>{
@@ -32,7 +34,8 @@ test('publication requires a current approval and freezes the package, metrics a
     const script={parentId:claim.id,claimVersion:claim.version,title:'Перевірка',script:'Вступ та висновок',subtitles:'1\nПідзаголовок'};
     let episode=await change('pub-author','episode','create',null,script);
     const publishedAt=time(35);
-    const publication={url:'https://youtu.be/QAPubTest02',version:episode.version,publishedAt,confirmed:true};
+    const publication={url:'https://youtu.be/QAPubTest02',version:episode.version,publishedAt,confirmed:true,
+      mediaRevisionId:'00000000-0000-4000-8000-000000000000'};
     const register=(data=publication)=>registerPublication(db,'pub-publisher',episode.id,data);
     await assert.rejects(register(),/APPROVAL_REQUIRED/);
     await assert.rejects(publicationPackage(db,'pub-author',episode.id,1),/FORBIDDEN/);
@@ -42,6 +45,20 @@ test('publication requires a current approval and freezes the package, metrics a
     assert.equal(strFromU8(archive['script.txt']).trim(),script.script);
     assert.ok(archive['subtitles.txt']);
     assert.equal(JSON.parse(strFromU8(archive['manifest.json'])).format,'16:9');
+    const {rows:[media]}=await db.query(`INSERT INTO episode_media_revisions
+      (episode_id,episode_version,uploaded_by,ordinal,pathname,expected_bytes,upload_until,expires_at,state,sha256,snapshot)
+      VALUES($1,$2,(SELECT id FROM members WHERE clerk_user_id='pub-author'),1,'montage/pub.mp4',600,now()+interval '1 hour',
+        now()+interval '1 day','passed',repeat('a',64),$3::jsonb) RETURNING id`,
+      [episode.id,episode.version,JSON.stringify({episodeVersion:episode.version})]);
+    publication.mediaRevisionId=media.id;
+    await assert.rejects(register(),/RELEASE_APPROVAL_REQUIRED/);
+    const {rows:[job]}=await db.query(`INSERT INTO ai_jobs(video_id,requested_by,dedupe_key,model,prompt_version,status,mode,media_revision_id)
+      VALUES($1,(SELECT id FROM members WHERE clerk_user_id='pub-author'),'pub-audit','gemini-test','v1','succeeded','video',$2) RETURNING id`,
+      [video.id,media.id]);
+    await db.query("INSERT INTO ai_attempts(job_id,attempt,status) VALUES($1,1,'succeeded')",[job.id]);
+    await db.query(`INSERT INTO prepublication_audits(job_id,attempt,media_revision_id,coverage,summary)
+      VALUES($1,1,$2,'[]'::jsonb,'No findings')`,[job.id,media.id]);
+    await reviewVideoAudit(db,'pub-review',episode.id,media.id,{action:'approve'});
     await assert.rejects(register({...publication,confirmed:false}),/INVALID_INPUT/);
     const [first,retry]=await Promise.all([register(),register()]);
     assert.equal(first.id,retry.id);

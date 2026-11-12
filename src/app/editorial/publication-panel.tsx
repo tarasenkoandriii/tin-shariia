@@ -9,8 +9,9 @@ type Correction = {
   id:string; status:string; revision:number; kind:string; original:string; replacement:string;
   reason:string; author:string; review_comment:string|null; posting_location:string|null;
 };
+type ReleaseMedia={id:string;ordinal:number;version:number;sha256:string|null;releaseApproved:boolean};
 export type Publication = {
-  id:string; episode_id:string; episode_version:number; youtube_id:string;
+  id:string; episode_id:string; episode_version:number; media_revision_id:string|null; media_ordinal:number|null; youtube_id:string;
   published_at:string; metrics:Metric[]; corrections:Correction[];
   history:{id:number; action:string; created_at:string; actor:string}[];
 };
@@ -27,17 +28,23 @@ function fields(event:FormEvent<HTMLFormElement>){
   return new FormData(event.currentTarget,(event.nativeEvent as SubmitEvent).submitter);
 }
 
-function Register({episode}:{episode:Episode}){
+function Register({episode,media}:{episode:Episode;media:ReleaseMedia[]}){
   const request=useRequest();
   return <form onSubmit={event=>{
     const form=fields(event);
     void request.send('/api/episodes/'+episode.id+'/publications',json({
       version:episode.version,url:form.get('url'),publishedAt:new Date(String(form.get('publishedAt'))).toISOString(),
-      confirmed:form.has('confirmed'),
+      mediaRevisionId:form.get('mediaRevisionId'),confirmed:form.has('confirmed'),
     }));
   }}>
     <label>Посилання опублікованого відео YouTube <input type="url" name="url" maxLength={2048} required /></label>
     <label>Час публікації (часовий пояс пристрою) <input type="datetime-local" name="publishedAt" required /></label>
+    <label>Допущена ревізія монтажу <select name="mediaRevisionId" required defaultValue="">
+      <option value="" disabled>Оберіть ревізію після допуску редактором</option>
+      {media.filter(item=>item.releaseApproved&&item.sha256).map(item=><option key={item.id} value={item.id}>
+        Монтаж {item.ordinal} · версія сценарію {item.version} · SHA-256 {item.sha256?.slice(0,12)}
+      </option>)}
+    </select></label>
     <label><input type="checkbox" name="confirmed" required /> Опубліковано відео за цією версією сценарію.</label>
     <button disabled={request.pending}>Зареєструвати публікацію</button>
     {request.message&&<output role="status">{request.message}</output>}
@@ -90,7 +97,7 @@ function CorrectionForm({publication,correction}:{publication:Publication;correc
   </form>;
 }
 
-export function PublicationPanel({episode,publication,roles}:{episode:Episode;publication?:Publication;roles:string[]}){
+export function PublicationPanel({episode,publication,roles,mediaRevisions}:{episode:Episode;publication?:Publication;roles:string[];mediaRevisions:ReleaseMedia[]}){
   const publisher=roles.includes('publisher'),editor=roles.includes('editor');
   const ready=episode.status==='approved'&&!episode.stale;
   if(!publication&&(!publisher||!ready)) return null;
@@ -101,6 +108,7 @@ export function PublicationPanel({episode,publication,roles}:{episode:Episode;pu
     {publication ? <>
       <p><a href={'https://www.youtube.com/watch?v='+publication.youtube_id} target="_blank" rel="noreferrer">
         Переглянути публікацію</a> · {formatTime(publication.published_at)} (Київ)</p>
+      {publication.media_revision_id&&<p>Допущений монтаж {publication.media_ordinal??'—'} · ревізія {publication.media_revision_id.slice(0,8)}</p>}
       <h6>Показники</h6>
       {publication.metrics.length>0&&<ul>{publication.metrics.map(metric=><li key={metric.day}>
         {metric.day} днів · {metric.views} переглядів · {metric.average_view_percent}% · {metric.source} · {formatTime(metric.measured_at)}
@@ -123,6 +131,9 @@ export function PublicationPanel({episode,publication,roles}:{episode:Episode;pu
           {historyLabels[event.action]} · {event.actor} · {formatTime(event.created_at)}
         </li>)}</ol>
       </details>
-    </> : <Register episode={episode} />}
+    </> : <>
+      {mediaRevisions.some(item=>item.releaseApproved&&item.sha256)?<Register episode={episode} media={mediaRevisions} />:
+        <p>Реєстрація публікації відкриється після успішного аудиту Gemini та явного допуску цієї ревізії редактором.</p>}
+    </>}
   </section>;
 }

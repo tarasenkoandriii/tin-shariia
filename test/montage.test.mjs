@@ -10,6 +10,8 @@ import {montageJob,montageReport} from '../src/media/montage-ffmpeg.mjs';
 import {enqueueVideoAudit,processAnalysisStep} from '../src/analysis/queue.mjs';
 import {validateVideoAudit} from '../src/analysis/video-input.mjs';
 import {videoAuditStatus} from '../src/analysis/video-status.mjs';
+import {reviewVideoAudit} from '../src/db/video-audit.mjs';
+import {registerPublication} from '../src/db/publications.mjs';
 import {montageStep} from '../src/media/montage-queue.mjs';
 
 const sha256='a'.repeat(64),ffmpegId='1a0b32d8-9cd7-4f01-bff4-68a767c1e77a';
@@ -36,10 +38,10 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
   const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
   const db=native?await database():new PGlite();
   try{
-    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits']){
+    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval']){
       await db.exec(await readFile(new URL('../drizzle/'+name+'.sql',import.meta.url),'utf8'));
     }
-    for(const [id,roles] of [['media-author',['author']],['media-review',['factchecker','editor']],['other-author',['author']]]){
+    for(const [id,roles] of [['media-author',['author']],['media-review',['factchecker','editor']],['media-publisher',['publisher']],['other-author',['author']]]){
       const {rows:[member]}=await db.query('INSERT INTO members (clerk_user_id,email) VALUES ($1,$2) RETURNING id',[id,id+'@example.test']);
       await db.query('INSERT INTO member_roles SELECT $1,unnest($2::text[])',[member.id,roles]);
     }
@@ -103,7 +105,10 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
       }
       assert.equal(state.interactionId,'test-interaction');
       const output={audioAvailable:true,visualAvailable:true,summary:'Test',
-        coverage:[{interval:0,audio:'Speech',visual:'Blue screen'}],findings:[]};
+        coverage:[{interval:0,audio:'Speech',visual:'Blue screen'}],findings:[{
+          category:'speech',severity:'major',startMs:0,endMs:1000,field:null,sourceIndex:null,
+          observation:'Test finding',fix:'Adjust the first phrase',
+        }]};
       const modalities=[{modality:'video',tokens:100}];
       assert.throws(()=>validateVideoAudit({...output,coverage:[{...output.coverage[0],interval:1}]},input,modalities),/VIDEO_COVERAGE_INCOMPLETE/);
       assert.throws(()=>validateVideoAudit({...output,audioAvailable:false},input,modalities),/VIDEO_INPUT_UNCONFIRMED/);
@@ -113,8 +118,31 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
     const [result]=await videoAuditStatus(db,'media-review',episode.id,row.id);
     assert.equal(result.status,'succeeded');
     assert.equal(result.reports[0].coverage[0].endMs,2000);
+    assert.equal(result.reports[0].findings[0].finding.observation,'Test finding');
+    const publish={url:'https://youtu.be/QAstg8test0',version:episode.version,publishedAt:new Date().toISOString(),confirmed:true,mediaRevisionId:row.id};
+    await assert.rejects(registerPublication(db,'media-publisher',episode.id,publish),/RELEASE_APPROVAL_REQUIRED/);
+    await assert.rejects(reviewVideoAudit(db,'media-author',episode.id,row.id,{action:'approve'}),/FORBIDDEN/);
+    await assert.rejects(reviewVideoAudit(db,'media-review',episode.id,row.id,{action:'approve'}),/FINDINGS_OPEN/);
+    await reviewVideoAudit(db,'media-review',episode.id,row.id,{action:'finding',attempt:1,position:0,
+      disposition:'resolved',comment:'Виправлено першу фразу у монтажі.'});
+    const reviewed=await videoAuditStatus(db,'media-review',episode.id,row.id);
+    assert.equal(reviewed[0].reports[0].findings[0].review.disposition,'resolved');
+    const approval=await reviewVideoAudit(db,'media-review',episode.id,row.id,{action:'approve'});
+    assert.equal(approval.media_revision_id,row.id);
+    assert.equal((await videoAuditStatus(db,'media-review',episode.id,row.id))[0].reports[0].reviewedByMe,true);
+    await assert.rejects(reviewVideoAudit(db,'media-review',episode.id,row.id,{action:'finding',attempt:1,position:0,
+      disposition:'accepted',comment:'Не змінювати.'}),/REVIEW_CLOSED/);
+    const {rows:[newRevision]}=await db.query(`INSERT INTO episode_media_revisions
+      (id,episode_id,episode_version,uploaded_by,ordinal,pathname,expected_bytes,upload_until,expires_at,state,sha256,report,snapshot)
+      SELECT gen_random_uuid(),episode_id,episode_version,uploaded_by,ordinal+1,'montage/revised.mp4',expected_bytes,
+        upload_until,expires_at,'passed',sha256,report,snapshot FROM episode_media_revisions WHERE id=$1 RETURNING id`,[row.id]);
+    assert.equal((await listMontage(db,'media-review',video.id)).find(item=>item.id===newRevision.id).release_approved,false);
+    await assert.rejects(registerPublication(db,'media-publisher',episode.id,{...publish,mediaRevisionId:newRevision.id,
+      url:'https://youtu.be/QAstg8test1'}),/RELEASE_APPROVAL_REQUIRED/);
+    const publication=await registerPublication(db,'media-publisher',episode.id,publish);
+    assert.equal(publication.media_revision_id,row.id);
     assert.equal(submissions,1);
-    assert.equal((await run('media-author',{retry:true,expectedAttempt:1})).attempt,2);
+    await assert.rejects(run('media-author',{retry:true,expectedAttempt:1}),/MEDIA_STALE/);
     assert.equal((await videoAuditStatus(db,'media-review',episode.id,row.id))[0].reports.length,1);
 
   }finally{if(!native)await db.close();}
