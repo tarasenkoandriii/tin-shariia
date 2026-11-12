@@ -49,7 +49,7 @@ export async function montageStep(db,id,token,{client=ffmpegMontage(),sign=monta
     const key='tin-montage-'+id;
     let job=row.ffmpeg_id?await client.job(row.ffmpeg_id):await client.lookup(key);
     if(!job&&row.ffmpeg_id) return complete('failed','MONTAGE_JOB_EXPIRED');
-    if(!job) job=await client.submit(key,await sign(row,'get'));
+    if(!job) job=await client.submit(key,await sign(row,'get',25));
     if(!job?.id) throw Error('MONTAGE_FFMPEG_UNAVAILABLE');
     await db.query(`UPDATE episode_media_revisions SET ffmpeg_id=$3,run_lease=now()+interval '3 minutes'
       WHERE id=$1 AND run_token=$2`,[id,token,job.id]);

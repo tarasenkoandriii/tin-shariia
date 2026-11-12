@@ -10,9 +10,10 @@ export function montageEnabled(){
     && Boolean(process.env.MONTAGE_FFMPEG_TOKEN);
 }
 
-export async function montageUrl(row,operation){
+export async function montageUrl(row,operation,readMinutes=5){
   const pathname=row.pathname;
-  const validUntil=operation==='put'?new Date(row.upload_until).getTime():Date.now()+UPLOAD_MINUTES*60000;
+  const validUntil=operation==='put'?new Date(row.upload_until).getTime():
+    Math.min(new Date(row.expires_at).getTime(),Date.now()+readMinutes*60000);
   const constraints=operation==='put'?{
     maximumSizeInBytes:row.expected_bytes,allowedContentTypes:['video/mp4'],
   }:{};
