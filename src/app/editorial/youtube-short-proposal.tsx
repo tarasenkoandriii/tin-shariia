@@ -6,6 +6,7 @@ type Proposal = {
   source: { url: string; start: number };
   manifest: null | { hook: string; title: string; description: string; clips: {startMs: number; endMs: number}[] };
   reasons: string[];
+  narrationUk?: string;
   spentMicros: number;
 };
 
@@ -58,6 +59,7 @@ export function YouTubeShortProposal() {
         <h3>{proposal.manifest.title}</h3>
         <p>{proposal.manifest.hook}</p>
         <p>{proposal.manifest.description}</p>
+        {proposal.narrationUk && <><h4>Текст для озвучення</h4><p>{proposal.narrationUk}</p></>}
         <ol>{proposal.manifest.clips.map((clip,index) => <li key={clip.startMs}>
           <a href={proposal.source.url + '&t=' + Math.floor(clip.startMs / 1000)} target="_blank" rel="noreferrer">
             {time(clip.startMs)}–{time(clip.endMs)}

@@ -1,6 +1,5 @@
-import { activeMember } from '../../../../access/membership.mjs';
+import { reserveSoniox } from '../../../../analysis/soniox-quota';
 import { publicationError, publicationIdentity, publicationReply } from '../../../../access/publication-http';
-import { database } from '../../../../db/runtime.mjs';
 import { uuid } from '../../../../editorial/workflow-input.mjs';
 
 export const maxDuration = 90;
@@ -87,22 +86,8 @@ export async function POST(request: Request) {
     const requestId = uuid(request.headers.get('Idempotency-Key'));
     const language = new URL(request.url).searchParams.get('language') ?? 'uk';
     if (!['uk','ru','en'].includes(language)) throw Error('INVALID_INPUT');
-    const db = await database();
-    const actor = await activeMember(db,identity);
-    if (!actor?.roles.some((role:string)=>['admin','author','editor'].includes(role))) throw Error('FORBIDDEN');
     const audio = await readAudio(request);
-    await db.transaction(async (tx:{query:typeof db.query})=>{
-      await tx.query('SELECT pg_advisory_xact_lock(72036601)');
-      const member = await activeMember(tx,identity);
-      if (!member?.roles.some((role:string)=>['admin','author','editor'].includes(role))) throw Error('FORBIDDEN');
-      const {rows:[existing]} = await tx.query('SELECT id FROM soniox_requests WHERE id=$1',[requestId]);
-      if (existing) throw Error('SONIOX_DUPLICATE');
-      const {rows:[count]} = await tx.query(`SELECT count(*) AS total,
-        count(*) FILTER (WHERE member_id=$1) AS actor FROM soniox_requests
-        WHERE created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`,[member.id]);
-      if (Number(count.total)>=10 || Number(count.actor)>=3) throw Error('SONIOX_QUOTA');
-      await tx.query('INSERT INTO soniox_requests(id,member_id) VALUES($1,$2)',[requestId,member.id]);
-    });
+    await reserveSoniox(identity, requestId);
     try { return publicationReply(await transcribe(audio,key,language)); }
     catch(error) {
       if (error instanceof Error && error.message === 'SONIOX_PROVIDER_TIMEOUT') throw error;
