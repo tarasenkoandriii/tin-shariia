@@ -158,7 +158,15 @@ export async function loadPublications(db,identity,videoId){
   await memberWith(db,identity);
   const {rows}=await db.query(`SELECT p.id,p.episode_id,p.episode_version,p.youtube_id,p.published_at,
     COALESCE((SELECT jsonb_agg(to_jsonb(m) ORDER BY m.day) FROM metric_snapshots m WHERE m.publication_id=p.id),'[]'::jsonb) AS metrics,
-    COALESCE((SELECT jsonb_agg(to_jsonb(c) - 'created_by' ORDER BY c.created_at DESC) FROM corrections c WHERE c.publication_id=p.id),'[]'::jsonb) AS corrections
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('id',co.id,'status',co.status,'revision',co.revision,
+      'kind',co.kind,'original',co.original,'replacement',co.replacement,'reason',co.reason,
+      'review_comment',co.review_comment,'posting_location',co.posting_location,'author',m.email) ORDER BY co.created_at DESC)
+      FROM corrections co JOIN members m ON m.id=co.created_by WHERE co.publication_id=p.id),'[]'::jsonb) AS corrections,
+    COALESCE((SELECT jsonb_agg(to_jsonb(h) ORDER BY h.id DESC) FROM (
+      SELECT pe.id,pe.action,pe.created_at,m.email AS actor
+      FROM publication_events pe JOIN members m ON m.id=pe.actor_id
+      WHERE pe.publication_id=p.id ORDER BY pe.id DESC LIMIT 50
+    ) h),'[]'::jsonb) AS history
     FROM publications p JOIN episodes e ON e.id=p.episode_id JOIN claims c ON c.id=e.claim_id WHERE c.video_id=$1`,[uuid(videoId)]);
   return rows;
 }

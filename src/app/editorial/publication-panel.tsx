@@ -7,16 +7,19 @@ import type { Episode } from './workflow-types';
 type Metric = { day:number; measured_at:string; views:number; average_view_percent:number; source:string };
 type Correction = {
   id:string; status:string; revision:number; kind:string; original:string; replacement:string;
-  reason:string; review_comment:string|null; posting_location:string|null;
+  reason:string; author:string; review_comment:string|null; posting_location:string|null;
 };
 export type Publication = {
   id:string; episode_id:string; episode_version:number; youtube_id:string;
   published_at:string; metrics:Metric[]; corrections:Correction[];
+  history:{id:number; action:string; created_at:string; actor:string}[];
 };
 
 const kinds: Record<string,string> = {
   quote:'Цитата',context:'Контекст',fact:'Факт',translation:'Переклад',metadata:'Дані публікації',other:'Інше',
 };
+const historyLabels:Record<string,string> = { register:'Зареєстровано публікацію',metrics:'Збережено замір',
+  propose:'Запропоновано виправлення',approve:'Погоджено виправлення',return:'Повернуто виправлення',post:'Зафіксовано публікацію виправлення' };
 const states: Record<string,string> = { review:'На перевірці',approved:'Погоджено',returned:'Повернуто',posted:'Опубліковано' };
 const formatTime=(value:string)=>new Intl.DateTimeFormat('uk-UA',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Kyiv'}).format(new Date(value));
 function fields(event:FormEvent<HTMLFormElement>){
@@ -109,11 +112,17 @@ export function PublicationPanel({episode,publication,roles}:{episode:Episode;pu
         <p><strong>{kinds[correction.kind]}</strong> · {states[correction.status]}</p>
         <p className="workflow-text">Було: {correction.original}</p><p className="workflow-text">Виправлено: {correction.replacement}</p>
         <p className="workflow-text">{correction.reason}</p>
+        <p>Відповідальний: {correction.author}</p>
         {correction.review_comment&&<p className="workflow-text">{correction.review_comment}</p>}
         {correction.posting_location&&<p className="workflow-text">Місце публікації: {correction.posting_location}</p>}
         {((editor&&correction.status==='review')||(publisher&&correction.status==='approved'))&&
           <CorrectionForm key={correction.revision} publication={publication} correction={correction} />}
       </article>)}
+      <details><summary>Історія публікації</summary>
+        <ol>{publication.history.map(event=><li key={event.id}>
+          {historyLabels[event.action]} · {event.actor} · {formatTime(event.created_at)}
+        </li>)}</ol>
+      </details>
     </> : <Register episode={episode} />}
   </section>;
 }
