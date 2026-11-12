@@ -1,0 +1,88 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import test from 'node:test';
+import {PGlite} from '@electric-sql/pglite';
+import {database} from '../src/db/runtime.mjs';
+import {initMontage,confirmMontage,readMontage,listMontage} from '../src/db/montage.mjs';
+import {changeEditorial} from '../src/db/editorial-workflow.mjs';
+import {registerVideo} from '../src/db/editorial-import.mjs';
+import {montageJob,montageReport} from '../src/media/montage-ffmpeg.mjs';
+import {montageStep} from '../src/media/montage-queue.mjs';
+
+const sha256='a'.repeat(64),ffmpegId='1a0b32d8-9cd7-4f01-bff4-68a767c1e77a';
+const audioReport='frame:0 pts:0 pts_time:0.1\nlavfi.r128.I=-21.4\nlavfi.r128.true_peak=0.100\n'
+  +'frame:9 pts:9 pts_time:1\nlavfi.silence_start=0.4\n'
+  +'frame:19 pts:19 pts_time:2\nlavfi.r128.I=-22.6\nlavfi.r128.true_peak=0.200\nlavfi.silence_end=1.1\n';
+const sample={id:ffmpegId,status:'succeeded',ffmpeg_version:'5.1',inputs_metadata:[{
+  key:'src',bytes:600,sha256,format:'mov,mp4,m4a,3gp,3g2,mj2',durationSec:2,
+  streams:[{type:'video',width:1920,height:1080,codec:'h264'},{type:'audio',codec:'aac',durationSec:2}],
+}]};
+
+test('strict report requires the right file, both tracks, full audio and a measurable peak',()=>{
+  assert.match(montageJob('https://private.example.test/a.mp4').ffmpeg_commands[0],/^-xerror .* -map 0:v:0 /);
+  const {report}=montageReport(sample,audioReport,600);
+  assert.deepEqual(report.silence,[{startMs:400,endMs:1100}]);
+  assert.equal(report.durationMs,2000);
+  assert.equal(report.truePeakDbtp,-13.98);
+  assert.throws(()=>montageReport(sample,audioReport,601),/INVALID_MEDIA/);
+  assert.throws(()=>montageReport(sample,audioReport.replace('pts_time:2','pts_time:1'),600),/AUDIO_INCOMPLETE/);
+  assert.throws(()=>montageReport(sample,audioReport.replaceAll(/true_peak=0\.\d+/g,'true_peak=0'),600),/AUDIO_SILENT/);
+});
+
+test('montage binds to approved snapshot and recovers ambiguous FFmpeg submission by key',async()=>{
+  const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
+  const db=native?await database():new PGlite();
+  try{
+    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0004_publication_records','0005_episode_media']){
+      await db.exec(await readFile(new URL('../drizzle/'+name+'.sql',import.meta.url),'utf8'));
+    }
+    for(const [id,roles] of [['media-author',['author']],['media-review',['factchecker','editor']],['other-author',['author']]]){
+      const {rows:[member]}=await db.query('INSERT INTO members (clerk_user_id,email) VALUES ($1,$2) RETURNING id',[id,id+'@example.test']);
+      await db.query('INSERT INTO member_roles SELECT $1,unnest($2::text[])',[member.id,roles]);
+    }
+    const video=await registerVideo(db,'https://youtu.be/QAmontage01');
+    const change=(identity,kind,action,item,extra={})=>changeEditorial(db,identity,kind,{
+      ...extra,action,id:item?.id,version:item?.version,expectedRevision:item?.revision,
+    });
+    let claim=await change('media-author','claim','create',null,{
+      parentId:video.id,quote:'Quote',question:'Question?',verdict:'confirmed',explanation:'Test',
+      evidence:[{title:'Report',url:'https://example.test/montage',accessedOn:'2026-11-12',locator:'1',coverage:'Fact'}],
+    });
+    claim=await change('media-author','claim','submit',claim);
+    claim=await change('media-review','claim','approve',claim);
+    let episode=await change('media-author','episode','create',null,{
+      parentId:claim.id,claimVersion:claim.version,title:'Master',script:'Script',pinnedComment:'Exact package',
+    });
+    const reserve=(identity,bytes=600)=>initMontage(db,identity,episode.id,{version:episode.version,bytes});
+    await assert.rejects(reserve('media-author'),/APPROVAL_REQUIRED/);
+    episode=await change('media-author','episode','submit',episode);
+    episode=await change('media-review','episode','approve',episode);
+    await assert.rejects(reserve('media-review'),/FORBIDDEN/);
+    await assert.rejects(reserve('media-author',129*1024*1024),/SIZE_INVALID/);
+    const row=await reserve('media-author');
+    assert.equal((await reserve('media-author')).id,row.id);
+    assert.equal(row.snapshot.episode.pinnedComment,'Exact package');
+    const object={pathname:row.pathname,size:600,contentType:'video/mp4'};
+    await assert.rejects(readMontage(db,'media-review',episode.id,row.id),/NOT_FOUND/);
+    await assert.rejects(confirmMontage(db,'other-author',episode.id,row.id,object),/FORBIDDEN/);
+    await assert.rejects(confirmMontage(db,'media-author',episode.id,row.id,{...object,size:599}),/OBJECT_MISMATCH/);
+    assert.equal((await confirmMontage(db,'media-author',episode.id,row.id,object)).state,'queued');
+    const token='2ebd8d1b-44c1-49f1-a44f-0b3398bb00bf';
+    await db.query("UPDATE episode_media_revisions SET state='checking',run_token=$2,run_lease=now()+interval '3 minutes' WHERE id=$1",[row.id,token]);
+    let sent=0;
+    const client={
+      lookup:async key=>{assert.equal(key,'tin-montage-'+row.id);return sent?sample:null;},
+      submit:async()=>{sent++;throw Error('Connection lost after acceptance');},
+      report:async()=>audioReport,
+    };
+    const sign=async()=> 'https://private.example.test/media.mp4';
+    assert.deepEqual(await montageStep(db,row.id,token,{client,sign}),{done:false});
+    assert.deepEqual(await montageStep(db,row.id,token,{client,sign}),{done:true});
+    assert.equal(sent,1);
+    const stored=await readMontage(db,'media-review',episode.id,row.id);
+    assert.equal(stored.sha256,sha256);
+    assert.equal(stored.state,'passed');
+    assert.equal(stored.report.width,1920);
+    assert.equal((await listMontage(db,'media-author',video.id))[0].owned,true);
+  }finally{if(!native)await db.close();}
+});

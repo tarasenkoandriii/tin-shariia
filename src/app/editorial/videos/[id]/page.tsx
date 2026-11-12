@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { listMontage } from '../../../../db/montage.mjs';
+import { MontagePanel, type Montage } from '../../montage-panel';
 import { loadPublications } from '../../../../db/publications.mjs';
 import { PublicationPanel, type Publication } from '../../publication-panel';
 import { AnalysisPanel } from '../../analysis-panel';
@@ -67,7 +69,7 @@ export default async function VideoPage({ params, searchParams }: {
   });
   if (!workflow.video) notFound();
   const video = workflow.video;
-  const publications: Publication[] = await loadPublications(db,id,videoId);
+  const [publications,montages]: [Publication[],Montage[]] = await Promise.all([loadPublications(db,id,videoId),listMontage(db,id,videoId)]);
   const byEpisode = new Map(publications.map(publication=>[publication.episode_id,publication]));
   const author = workflow.roles.includes('author');
   const transcripts: Transcript[] = workflow.transcripts;
@@ -139,6 +141,8 @@ export default async function VideoPage({ params, searchParams }: {
           {author && claim.status==='approved' && !byEpisode.has(episode.id) && <details><summary>Редагувати сценарій</summary>
             <EpisodeForm key={episode.revision} claim={claim} episode={episode} />
           </details>}
+          <MontagePanel episode={episode} items={montages.filter(item=>item.episode_id===episode.id)}
+            canUpload={author&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)} />
           <PublicationPanel episode={episode} publication={byEpisode.get(episode.id)} roles={workflow.roles} />
         </article>)}
       </article>)}

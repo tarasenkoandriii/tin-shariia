@@ -24,7 +24,7 @@ async function event(tx,publicationId,actor,action,details,correctionId=null){
     VALUES ($1,$2,$3,$4,$5::text::jsonb)`,[publicationId,correctionId,actor,action,json(details)]);
 }
 
-async function packageFor(tx,episode,version){
+export async function packageFor(tx,episode,version){
   if(!episode) throw Error('NOT_FOUND');
   if(!Number.isSafeInteger(version)||version<1) throw Error('INVALID_INPUT');
   if(episode.status!=='approved'||version!==episode.version) throw Error('APPROVAL_REQUIRED');
