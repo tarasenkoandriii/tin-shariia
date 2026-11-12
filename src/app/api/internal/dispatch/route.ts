@@ -12,6 +12,11 @@ export async function GET(request: Request) {
   }
   const [sources,montages]=await Promise.allSettled([dispatchSources(),dispatchMontages()]);
   const failed=sources.status==='rejected'||montages.status==='rejected';
+  console.info('CRON_DISPATCH_RESULT',JSON.stringify({
+    failed,
+    sources:sources.status==='fulfilled'?sources.value:{failed:true},
+    montages:montages.status==='fulfilled'?montages.value:{failed:true},
+  }));
   return Response.json({sources:sources.status==='fulfilled'?sources.value:null,
     montages:montages.status==='fulfilled'?montages.value:null},{status:failed?503:200,headers});
 }
