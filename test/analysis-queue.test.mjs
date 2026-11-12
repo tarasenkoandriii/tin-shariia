@@ -9,7 +9,7 @@ import { geminiProvider } from '../src/analysis/gemini.mjs';
 import { mergeDrafts, splitTranscript, validateDrafts } from '../src/analysis/input.mjs';
 
 const config={model:'gemini-4-argon',inputRate:2,outputRate:10,monthlyMicros:1000000};
-const schemaFiles=['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue'];
+const schemaFiles=['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits'];
 const quote='Міст відкрили в понеділок.';
 const proposal={kind:'fact',quote,paraphrase:false,segmentIds:[0],question:'Коли відкрили міст?'};
 

@@ -1,6 +1,7 @@
 'use client';
 
 import {useEffect,useState} from 'react';
+import {VideoAuditPanel} from './video-audit-panel';
 import {useRouter} from 'next/navigation';
 import type {Episode} from './workflow-types';
 
@@ -98,6 +99,8 @@ export function MontagePanel({episode,items,canUpload}:{episode:Episode;items:Mo
         </li>)}</ul>:<p>Пауз понад 0,5 с нижче −45 дБ не виявлено.</p>}
         {item.sha256&&<p>SHA-256 <code>{item.sha256}</code></p>}
       </details>}
+      {item.sha256&&<VideoAuditPanel endpoint={base+'/'+item.id+'/audits'}
+        canRun={canUpload&&item.state==='passed'&&item.episode_version===episode.version} />}
     </li>)}</ol>}
   </section>;
 }

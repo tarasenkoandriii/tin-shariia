@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { activeMember } from '../access/membership.mjs';
+import { videoOutputLimit, videoPrompt, videoPromptVersion } from './video-input.mjs';
 import { uuid } from '../editorial/workflow-input.mjs';
 import { makePrompt, mergeDrafts, outputLimit, promptVersion, splitTranscript } from './input.mjs';
 
@@ -8,24 +9,65 @@ const transientLimit=2;
 const active=['queued','running'];
 const json = value=>JSON.stringify(value);
 
-export async function enqueueAnalysis(db, identity, videoId, input, config) {
-  videoId=uuid(videoId);
+export function enqueueAnalysis(db,identity,videoId,input,config){
   const transcriptId=uuid(input.transcriptId);
-  return db.transaction(async tx=>{
-    await tx.query('SELECT pg_advisory_xact_lock(72036593)');
-    const member=await activeMember(tx,identity);
-    if (!member?.roles.includes('author')) throw Error('FORBIDDEN');
+  videoId=uuid(videoId);
+  return enqueue(db,identity,input,config,async tx=>{
     const {rows:[transcript]}=await tx.query(
       'SELECT content_hash FROM transcripts WHERE id=$1 AND video_id=$2',[transcriptId,videoId],
     );
-    if (!transcript) throw Error('NOT_FOUND');
-    const fingerprint=createHash('sha256').update(json([videoId,'transcript',transcriptId,transcript.content_hash,
-      config.model,promptVersion])).digest('hex');
+    if(!transcript) throw Error('NOT_FOUND');
+    return {
+      videoId,transcriptId,mediaId:null,mode:'transcript',hash:transcript.content_hash,prompt:promptVersion,
+      async work(){
+        const {rows}=await tx.query(
+          'SELECT position,start_ms,end_ms,body FROM transcript_segments WHERE transcript_id=$1 ORDER BY position LIMIT 12001',[transcriptId],
+        );
+        if(rows.length>12000) throw Error('TRANSCRIPT_TOO_LARGE');
+        const chunks=splitTranscript(rows);
+        const reserve=chunks.reduce((sum,chunk)=>sum+(Buffer.byteLength(makePrompt(chunk))+1024)*config.inputRate
+          +outputLimit*config.outputRate,0);
+        return {chunks,reserve};
+      },
+    };
+  });
+}
+
+export function enqueueVideoAudit(db,identity,episodeId,mediaId,input,config){
+  return enqueue(db,identity,input,config,async tx=>{
+    const {rows:[media]}=await tx.query(`SELECT m.id,m.episode_version,m.snapshot,m.sha256,m.expected_bytes,m.report,
+      m.state,m.expires_at,c.video_id,c.status AS claim_status,c.version AS claim_version,
+      e.version AS current_version,e.status AS episode_status,p.id AS publication
+      FROM episode_media_revisions m JOIN episodes e ON e.id=m.episode_id JOIN claims c ON c.id=e.claim_id
+      LEFT JOIN publications p ON p.episode_id=e.id WHERE m.id=$1 AND e.id=$2 FOR SHARE OF m,e,c`,[uuid(mediaId),uuid(episodeId)]);
+    if(!media) throw Error('NOT_FOUND');
+    const durationMs=media.report?.durationMs;
+    if(media.state!=='passed'||!media.sha256||!Number.isInteger(durationMs)||durationMs<100||durationMs>600000
+        ||!media.report?.audioCodec||new Date(media.expires_at).getTime()<=Date.now()) throw Error('MEDIA_NOT_READY');
+    if(media.publication||media.episode_status!=='approved'||media.claim_status!=='approved'
+        ||media.episode_version!==media.current_version||media.snapshot.claimVersion!==media.claim_version) throw Error('MEDIA_STALE');
+    const chunk={mediaId:media.id,durationMs,snapshot:media.snapshot,expectedBytes:media.expected_bytes,sha256:media.sha256};
+    return {
+      videoId:media.video_id,transcriptId:null,mediaId:media.id,mode:'video',hash:media.sha256,prompt:videoPromptVersion,
+      work:()=>({chunks:[chunk],reserve:(Math.ceil(durationMs/1000)*320+Buffer.byteLength(videoPrompt(chunk))+2048)*config.inputRate
+        +videoOutputLimit*config.outputRate}),
+    };
+  });
+}
+
+function enqueue(db,identity,input,config,resolveSource){
+  return db.transaction(async tx=>{
+    await tx.query('SELECT pg_advisory_xact_lock(72036593)');
+    const member=await activeMember(tx,identity);
+    if(!member?.roles.includes('author')) throw Error('FORBIDDEN');
+    const source=await resolveSource(tx);
+    const {videoId,transcriptId,mediaId,mode,prompt,hash}=source;
+    const fingerprint=createHash('sha256').update(json([videoId,mode,transcriptId??mediaId,hash,config.model,prompt])).digest('hex');
     const {rows:[existing]}=await tx.query('SELECT * FROM ai_jobs WHERE dedupe_key=$1 FOR UPDATE',[fingerprint]);
     if (input.retry===true) {
       if (!existing||existing.requested_by!==member.id) throw Error('FORBIDDEN');
       if (input.expectedAttempt!==existing.attempt) throw Error('ATTEMPT_CONFLICT');
-      if (!['failed','unknown'].includes(existing.status)||existing.attempt>=attemptsLimit) throw Error('RETRY_NOT_AVAILABLE');
+      if (!(mode==='video'?['failed','unknown','succeeded']:['failed','unknown']).includes(existing.status)||existing.attempt>=attemptsLimit) throw Error('RETRY_NOT_AVAILABLE');
       if (existing.status==='unknown'&&input.acknowledgeUnknown!==true) throw Error('ACKNOWLEDGMENT_REQUIRED');
     } else if (existing) {
       return { id:existing.id, status:existing.status, attempt:existing.attempt, deduplicated:true };
@@ -35,14 +77,7 @@ export async function enqueueAnalysis(db, identity, videoId, input, config) {
        FROM ai_jobs WHERE status IN ('queued','running')`,[member.id],
     );
     if (counts.total>=2||counts.actor>=1) throw Error('CONCURRENCY_LIMIT');
-    const {rows}=await tx.query(
-      `SELECT position,start_ms,end_ms,body FROM transcript_segments
-       WHERE transcript_id=$1 ORDER BY position LIMIT 12001`,[transcriptId],
-    );
-    if(rows.length>12000) throw Error('TRANSCRIPT_TOO_LARGE');
-    const chunks=splitTranscript(rows);
-    const reserve=chunks.reduce((sum,chunk)=>sum+(Buffer.byteLength(makePrompt(chunk))+1024)*config.inputRate
-      + outputLimit*config.outputRate,0);
+    const {chunks,reserve}=await source.work();
     const {rows:[budget]}=await tx.query(
       `SELECT date_trunc('month',now() AT TIME ZONE 'UTC')::date AS month,
        COALESCE(sum(CASE WHEN status='settled' THEN spent_micros ELSE GREATEST(reserved_micros,spent_micros) END),0) AS used
@@ -55,9 +90,9 @@ export async function enqueueAnalysis(db, identity, videoId, input, config) {
       await tx.query("UPDATE ai_jobs SET attempt=$2,status='queued',error_code=NULL,updated_at=now() WHERE id=$1",[id,attempt]);
     }else{
       const {rows:[created]}=await tx.query(
-        `INSERT INTO ai_jobs (video_id,transcript_id,requested_by,dedupe_key,model,prompt_version,status)
-         VALUES ($1,$2,$3,$4,$5,$6,'queued') RETURNING id`,
-        [videoId,transcriptId,member.id,fingerprint,config.model,promptVersion],
+        `INSERT INTO ai_jobs (video_id,transcript_id,requested_by,dedupe_key,model,prompt_version,mode,media_revision_id,status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'queued') RETURNING id`,
+        [videoId,transcriptId,member.id,fingerprint,config.model,prompt,mode,mediaId],
       );
       id=created.id;
     }
@@ -123,7 +158,7 @@ export async function recoverAnalysis(db){
       if(!await lockedJob(tx,item.id,item.attempt)) return;
       const {rows:[expired]}=await tx.query(
         `SELECT a.lease_token, EXISTS(SELECT 1 FROM ai_chunks c
-           WHERE c.job_id=a.job_id AND c.attempt=a.attempt AND c.status='sending') AS sending
+           WHERE c.job_id=a.job_id AND c.attempt=a.attempt AND c.status='sending' AND NOT (COALESCE(c.provider_state,'{}'::jsonb) ? 'interactionId')) AS sending
          FROM ai_attempts a JOIN job_outbox o USING (job_id,attempt)
          WHERE a.job_id=$1 AND a.attempt=$2 AND ((a.lease_until<=now()) OR
            (a.lease_until IS NULL AND GREATEST(o.finished_at,o.available_at)<=now()-interval '3 minutes'))`,[item.id,item.attempt],
@@ -131,6 +166,7 @@ export async function recoverAnalysis(db){
       if(!expired) return;
       if(expired.sending) await finish(tx,item.id,item.attempt,'unknown','PROVIDER_OUTCOME_UNKNOWN');
       else{
+        await tx.query("UPDATE ai_chunks SET status='pending' WHERE job_id=$1 AND attempt=$2 AND status='sending' AND provider_state ? 'interactionId'",[item.id,item.attempt]);
         await tx.query('UPDATE ai_attempts SET lease_token=NULL,lease_until=NULL WHERE job_id=$1 AND attempt=$2',[item.id,item.attempt]);
         await tx.query(`UPDATE job_outbox SET finished_at=NULL,lease_token=NULL,lease_until=NULL,available_at=now()
           WHERE job_id=$1 AND attempt=$2`,[item.id,item.attempt]);
@@ -153,14 +189,24 @@ export async function processAnalysisStep(db,id,attempt,provider){
     );
     if(!chunk){
       const {rows}=await tx.query('SELECT result FROM ai_chunks WHERE job_id=$1 AND attempt=$2 ORDER BY position',[id,attempt]);
-      const drafts=mergeDrafts(rows.flatMap(row=>row.result));
-      for(const [position,draft] of drafts.entries()){
-        await tx.query('INSERT INTO ai_claim_drafts (job_id,position,draft) VALUES ($1,$2,$3::text::jsonb)',[id,position,json(draft)]);
+      if(job.mode==='video'){
+        const report=rows[0].result;
+        await tx.query(`INSERT INTO prepublication_audits (job_id,attempt,media_revision_id,coverage,summary)
+          VALUES ($1,$2,$3,$4::text::jsonb,$5)`,[id,attempt,job.media_revision_id,json(report.coverage),report.summary]);
+        for(const [position,finding] of report.findings.entries()){
+          await tx.query('INSERT INTO audit_findings (job_id,attempt,position,finding) VALUES ($1,$2,$3,$4::text::jsonb)',
+            [id,attempt,position,json(finding)]);
+        }
+      }else{
+        const drafts=mergeDrafts(rows.flatMap(row=>row.result));
+        for(const [position,draft] of drafts.entries()){
+          await tx.query('INSERT INTO ai_claim_drafts (job_id,position,draft) VALUES ($1,$2,$3::text::jsonb)',[id,position,json(draft)]);
+        }
       }
       await finish(tx,id,attempt,'succeeded',null);
       return {done:true};
     }
-    if(chunk.status==='sending'){
+    if(chunk.status==='sending'&&!chunk.provider_state?.interactionId){
       await finish(tx,id,attempt,'unknown','PROVIDER_OUTCOME_UNKNOWN');
       return {done:true};
     }
@@ -175,7 +221,7 @@ export async function processAnalysisStep(db,id,attempt,provider){
   if(!work.chunk) return work;
   const {job,chunk,token}=work;
   let outcome;
-  try{outcome=await provider(job.model,chunk.input);}
+  try{outcome=await provider(job.model,chunk.input,{mode:job.mode,state:chunk.provider_state});}
   catch{outcome={type:'unknown',code:'PROVIDER_OUTCOME_UNKNOWN'};}
   return db.transaction(async tx=>{
     if(!await lockedJob(tx,id,attempt)) return {done:true};
@@ -184,6 +230,15 @@ export async function processAnalysisStep(db,id,attempt,provider){
     if(outcome.usage){
       const cost=outcome.usage.input*chunk.input_rate+outcome.usage.output*chunk.output_rate;
       await tx.query('UPDATE budget_reservations SET spent_micros=spent_micros+$3 WHERE job_id=$1 AND attempt=$2',[id,attempt,cost]);
+    }
+    if(outcome.type==='waiting'){
+      await tx.query(`UPDATE ai_chunks SET status='pending',provider_state=$4::text::jsonb,
+        next_at=now()+$5::integer*interval '1 second' WHERE job_id=$1 AND attempt=$2 AND position=$3`,
+        [id,attempt,chunk.position,json(outcome.state),outcome.delay]);
+      await tx.query(`UPDATE job_outbox SET available_at=now()+$3::integer*interval '1 second'
+        WHERE job_id=$1 AND attempt=$2`,[id,attempt,outcome.delay]);
+      await tx.query('UPDATE ai_attempts SET lease_token=NULL,lease_until=NULL WHERE job_id=$1 AND attempt=$2',[id,attempt]);
+      return {delay:outcome.delay};
     }
     if(outcome.type==='success'){
       await tx.query(`UPDATE ai_chunks SET status='complete',result=$4::text::jsonb,usage=$5::text::jsonb
@@ -216,7 +271,7 @@ export async function analysisStatus(db,identity,selection){
     (SELECT count(*)::integer FROM ai_chunks c WHERE c.job_id=j.id AND c.attempt=j.attempt AND c.status='complete') AS completed_chunks,
     (SELECT count(*)::integer FROM ai_chunks c WHERE c.job_id=j.id AND c.attempt=j.attempt) AS total_chunks
     FROM ai_jobs j JOIN budget_reservations r ON r.job_id=j.id AND r.attempt=j.attempt
-    WHERE ${where} ORDER BY j.created_at DESC LIMIT 20`,[uuid(id??videoId),member.id]);
+    WHERE j.mode='transcript' AND ${where} ORDER BY j.created_at DESC LIMIT 20`,[uuid(id??videoId),member.id]);
   if(!id) return rows;
   if(!rows.length) throw Error('NOT_FOUND');
   const {rows:drafts}=await db.query('SELECT position,draft FROM ai_claim_drafts WHERE job_id=$1 ORDER BY position',[id]);

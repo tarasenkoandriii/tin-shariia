@@ -7,6 +7,9 @@ import {initMontage,confirmMontage,readMontage,listMontage} from '../src/db/mont
 import {changeEditorial} from '../src/db/editorial-workflow.mjs';
 import {registerVideo} from '../src/db/editorial-import.mjs';
 import {montageJob,montageReport} from '../src/media/montage-ffmpeg.mjs';
+import {enqueueVideoAudit,processAnalysisStep} from '../src/analysis/queue.mjs';
+import {validateVideoAudit} from '../src/analysis/video-input.mjs';
+import {videoAuditStatus} from '../src/analysis/video-status.mjs';
 import {montageStep} from '../src/media/montage-queue.mjs';
 
 const sha256='a'.repeat(64),ffmpegId='1a0b32d8-9cd7-4f01-bff4-68a767c1e77a';
@@ -33,7 +36,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
   const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
   const db=native?await database():new PGlite();
   try{
-    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0004_publication_records','0005_episode_media']){
+    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits']){
       await db.exec(await readFile(new URL('../drizzle/'+name+'.sql',import.meta.url),'utf8'));
     }
     for(const [id,roles] of [['media-author',['author']],['media-review',['factchecker','editor']],['other-author',['author']]]){
@@ -84,5 +87,35 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
     assert.equal(stored.state,'passed');
     assert.equal(stored.report.width,1920);
     assert.equal((await listMontage(db,'media-author',video.id))[0].owned,true);
+    const config={model:'gemini-test',inputRate:2,outputRate:10,monthlyMicros:1000000};
+    const run=(identity,input={},limits=config)=>enqueueVideoAudit(db,identity,episode.id,row.id,input,limits);
+    await assert.rejects(run('media-review'),/FORBIDDEN/);
+    await assert.rejects(run('media-author',{}, {...config,monthlyMicros:1}),/BUDGET_EXHAUSTED/);
+    const job=await run('media-author');
+    assert.equal((await run('media-author')).id,job.id);
+    let submissions=0;
+    const provider=async(_model,input,{mode,state})=>{
+      assert.equal(mode,'video');
+      assert.equal(input.sha256,sha256);
+      if(!state){
+        submissions++;
+        return {type:'waiting',delay:0,state:{interactionId:'test-interaction'}};
+      }
+      assert.equal(state.interactionId,'test-interaction');
+      const output={audioAvailable:true,visualAvailable:true,summary:'Test',
+        coverage:[{interval:0,audio:'Speech',visual:'Blue screen'}],findings:[]};
+      const modalities=[{modality:'video',tokens:100}];
+      assert.throws(()=>validateVideoAudit({...output,coverage:[{...output.coverage[0],interval:1}]},input,modalities),/VIDEO_COVERAGE_INCOMPLETE/);
+      assert.throws(()=>validateVideoAudit({...output,audioAvailable:false},input,modalities),/VIDEO_INPUT_UNCONFIRMED/);
+      return {type:'success',drafts:validateVideoAudit(output,input,modalities),usage:{input:100,output:20}};
+    };
+    for(let step=0;step<3;step++) await processAnalysisStep(db,job.id,1,provider);
+    const [result]=await videoAuditStatus(db,'media-review',episode.id,row.id);
+    assert.equal(result.status,'succeeded');
+    assert.equal(result.reports[0].coverage[0].endMs,2000);
+    assert.equal(submissions,1);
+    assert.equal((await run('media-author',{retry:true,expectedAttempt:1})).attempt,2);
+    assert.equal((await videoAuditStatus(db,'media-review',episode.id,row.id))[0].reports.length,1);
+
   }finally{if(!native)await db.close();}
 });
