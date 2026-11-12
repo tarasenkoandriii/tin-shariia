@@ -24,7 +24,7 @@ function makeClient(env){
 function reportResult(raw,input,usage,modalities){
   if(!usage) return unknown('PROVIDER_USAGE_UNKNOWN');
   try{
-    const report=validateVideoAudit(JSON.parse(raw),input,modalities);
+    const report=validateVideoAudit(JSON.parse(raw?.trim().replace(/^```(?:json)?\s*|\s*```$/gi,'')),input,modalities);
     return {type:'success',usage,drafts:report};
   }catch(error){
     return failed(error.message?.startsWith('VIDEO_')?error.message:'PROVIDER_RESPONSE_INVALID',usage);
@@ -57,33 +57,34 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
     if(!row||row.state!=='passed'||row.sha256!==input.sha256||new Date(row.expires_at).getTime()<=Date.now()){
       return failed('MEDIA_NOT_READY');
     }
-    let uri;
+    let video;
     try{
       if(progress.fileName){
         const file=await ai.files.get({name:progress.fileName});
         if(file.state==='FAILED') return failed('VIDEO_FILE_REJECTED');
         if(file.state!=='ACTIVE') return wait(progress);
         if(!file.uri) return failed('VIDEO_FILE_REJECTED');
-        uri=file.uri;
+        video={uri:file.uri};
       }else{
         const source=await fetch(await sign(row,'get',15),{redirect:'error',signal:AbortSignal.timeout(40000)});
         if(!source.ok||Number(source.headers.get('content-length'))!==input.expectedBytes) return failed('VIDEO_FILE_REJECTED');
-        const file=await ai.files.upload({file:await source.blob(),config:{mimeType:'video/mp4'}});
-        if(!file.name) return failed('VIDEO_FILE_REJECTED');
-        return wait({...progress,fileName:file.name});
+        if(input.expectedBytes>10_000_000){
+          const file=await ai.files.upload({file:await source.blob(),config:{mimeType:'video/mp4'}});
+          if(!file.name) return failed('VIDEO_FILE_REJECTED');
+          return wait({...progress,fileName:file.name});
+        }
+        video={data:Buffer.from(await source.arrayBuffer()).toString('base64')};
       }
     }catch{return failed('VIDEO_FILE_REJECTED');}
     try{
-      const result=await ai.models.generateContent({
-        model,
-        contents:[{role:'user',parts:[{fileData:{fileUri:uri,mimeType:'video/mp4'}},{text:videoPrompt(input)}]}],
-        config:{maxOutputTokens:videoOutputLimit,thinkingConfig:{thinkingLevel:'LOW'},
-          responseMimeType:'application/json',responseJsonSchema:videoResponseFormat.schema,
-          httpOptions:{timeout:55000,retryOptions:{attempts:1}}},
-      });
-      const usage=result.usageMetadata;
-      const modalities=(usage?.promptTokensDetails??[]).map(item=>({modality:item.modality,tokens:item.tokenCount}));
-      return reportResult(result.text,input,usageFor(usage),modalities);
+      const text=videoPrompt(input)+'\nПоверни один JSON-об’єкт без Markdown за схемою: '+JSON.stringify(videoResponseFormat.schema);
+      const result=await ai.interactions.create({
+        model,store:false,input:[{type:'video',...video,mime_type:'video/mp4'},{type:'text',text}],
+        generation_config:{max_output_tokens:videoOutputLimit,thinking_level:'low'},
+      },{...requestOptions,timeout:55000});
+      const usage=usageFor(result.usage);
+      if(result.status!=='completed') return usage?failed('VIDEO_PROVIDER_FAILED',usage):unknown('PROVIDER_USAGE_UNKNOWN');
+      return reportResult(result.output_text,input,usage,result.usage?.input_tokens_by_modality??[]);
     }catch(error){
       if(error?.status===429) return failed("PROVIDER_UNAVAILABLE");
       if(error?.status>=400&&error.status<500&&error.status!==408){
