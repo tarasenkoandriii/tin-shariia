@@ -77,14 +77,13 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
     }catch{return failed('VIDEO_FILE_REJECTED');}
     try{
       const interaction=await ai.interactions.create({
-        model,background:true,store:true,
+        model,store:false,
         input:[{type:'video',uri,mime_type:'video/mp4'},
           {type:'text',text:videoPrompt(input)}],
         generation_config:{max_output_tokens:videoOutputLimit,thinking_level:'low'},
         response_format:videoResponseFormat,
-      },requestOptions);
-      if(!interaction.id) return unknown('PROVIDER_OUTCOME_UNKNOWN');
-      return wait({...progress,interactionId:interaction.id});
+      },{...requestOptions,timeout:55000});
+      return interactionResult(interaction,input);
     }catch(error){
       if(error?.status===429) return failed("PROVIDER_UNAVAILABLE");
       if(error?.status>=400&&error.status<500&&error.status!==408){
