@@ -96,10 +96,8 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
       if(error?.status===429) return failed("PROVIDER_UNAVAILABLE");
       if(error?.status>=400&&error.status<500&&error.status!==408){
         const detail=String(error.message??'').toLowerCase();
-        const reason=['schema','response_format','processing','fps','background','store','permission',
-          'inline','file','uri','unsupported','not supported','invalid','thinking']
-          .filter(term=>detail.includes(term)).join(',');
-        console.warn('VIDEO_PROVIDER_REJECTED',error.status,reason);
+        const message=String(error.message??'').slice(0,1200).replace(/(key|token|uri|url)=[^\s&]+/gi,'$1=[redacted]');
+        console.warn('VIDEO_PROVIDER_REJECTED',error.status,message);
         return failed('PROVIDER_REJECTED');
       }
       return unknown('PROVIDER_OUTCOME_UNKNOWN');
