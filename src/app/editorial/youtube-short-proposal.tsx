@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 type Proposal = {
   source: { url: string; start: number };
@@ -14,6 +14,44 @@ const time = (ms: number) => {
   const seconds = Math.floor(ms / 1000);
   return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
 };
+
+function UkrainianVoice({ initialText }: { initialText: string }) {
+  const [text,setText] = useState(initialText);
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState('');
+  const [url,setUrl] = useState('');
+  const attempt = useRef<{text:string;id:string}|null>(null);
+  const pending = useRef(false);
+
+  async function synthesize(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const clean = text.trim();
+    if (pending.current || !clean) return;
+    if (attempt.current?.text !== clean) attempt.current = {text:clean,id:crypto.randomUUID()};
+    pending.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch('/api/editorial/soniox/tts',{
+        method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':attempt.current.id},
+        body:JSON.stringify({text:clean}),
+      });
+      if (!response.ok) throw Error((await response.json()).error?.code ?? 'SONIOX_PROVIDER_ERROR');
+      setUrl(URL.createObjectURL(await response.blob()));
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'SONIOX_PROVIDER_ERROR');
+    } finally { pending.current = false; setBusy(false); }
+  }
+
+  useEffect(()=>()=>{ if (url) URL.revokeObjectURL(url); },[url]);
+
+  return <form onSubmit={synthesize}>
+    <label>Текст українською <textarea required maxLength={650} value={text} onChange={e=>setText(e.target.value)} /></label>
+    <button disabled={busy || !text.trim()}>{busy ? 'Озвучуємо…' : 'Озвучити українською · Maya'}</button>
+    {error && <p role="alert">Озвучення не вдалося ({error}).</p>}
+    {url && <p><audio controls src={url} /> <a href={url} download="narration-uk.mp3">Завантажити MP3</a></p>}
+  </form>;
+}
 
 export function YouTubeShortProposal() {
   const [busy,setBusy] = useState(false);
@@ -59,7 +97,7 @@ export function YouTubeShortProposal() {
         <h3>{proposal.manifest.title}</h3>
         <p>{proposal.manifest.hook}</p>
         <p>{proposal.manifest.description}</p>
-        {proposal.narrationUk && <><h4>Текст для озвучення</h4><p>{proposal.narrationUk}</p></>}
+
         <ol>{proposal.manifest.clips.map((clip,index) => <li key={clip.startMs}>
           <a href={proposal.source.url + '&t=' + Math.floor(clip.startMs / 1000)} target="_blank" rel="noreferrer">
             {time(clip.startMs)}–{time(clip.endMs)}
@@ -68,5 +106,7 @@ export function YouTubeShortProposal() {
       </> : <p>У цьому фрагменті Gemini не знайшов самодостатнього уривка.</p>}
       <p>Витрати за даними Gemini: ${(proposal.spentMicros / 1_000_000).toFixed(4)}</p>
     </div>}
+    <h3>Озвучення контррозбору</h3>
+    <UkrainianVoice key={proposal?.narrationUk ?? ''} initialText={proposal?.narrationUk ?? ''} />
   </section>;
 }
