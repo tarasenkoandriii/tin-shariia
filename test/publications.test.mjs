@@ -11,7 +11,7 @@ import { packageZip } from '../src/editorial/publication-zip.mjs';
 import { reviewVideoAudit } from '../src/db/video-audit.mjs';
 
 const sql=['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue',
-  '0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit'];
+  '0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit','0010_youtube_uploads'];
 const time=days=>new Date(Date.now()-days*86400000).toISOString();
 
 test('publication requires a current approval and freezes the package, metrics and corrections',async()=>{

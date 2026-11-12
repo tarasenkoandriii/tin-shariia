@@ -71,6 +71,13 @@
       "when": 1794509900000,
       "tag": "0009_shorts_audit",
       "breakpoints": false
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794513000000,
+      "tag": "0010_youtube_uploads",
+      "breakpoints": false
     }
   ]
 }

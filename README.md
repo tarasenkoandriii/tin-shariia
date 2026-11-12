@@ -54,3 +54,11 @@ FFmpeg збирає фрагменти в H.264/AAC MP4 1080×1920, 30 fps, 30�
 `/editorial/youtube-channel` показує останні публічні відео каналу Анатолія Шарія (`UCVPYbobPRzz0SjinWekjUBw`): по 20 на сторінку, за замовчуванням новіші зверху. На поточній сторінці можна сортувати за датою, переглядами та вподобаннями. У картці є дата, тривалість, перегляди, вподобання, коментарі, опис і доступні теги/мова/категорія. Статистика, прихована власником відео, позначається як недоступна, а не як нуль.
 
 Дані читаються сервером через YouTube Data API v3; браузер не бачить API key. Для Production потрібен окремий Secret `YOUTUBE_API_KEY` у Vercel-проєкті `tin-shariia`, з увімкненим YouTube Data API v3. Без ключа сторінка повідомить про налаштування, а не покаже вигадані дані. Доступ до сторінки й JSON-маршруту мають лише учасники редакції.
+
+### YouTube uploads (Stage 13)
+
+OAuth and resumable Shorts-upload support is implemented locally but is not enabled in Production until the Google Web OAuth client is configured. Register this exact callback URI with Google:
+
+`https://tin-shariia.viral4creators.app/api/youtube/oauth/callback`
+
+Set these Vercel Production secrets in project `tin-shariia`: `GOOGLE_YOUTUBE_CLIENT_ID`, `GOOGLE_YOUTUBE_CLIENT_SECRET`, and a separately generated 32-byte base64url `YOUTUBE_TOKEN_ENCRYPTION_KEY`. Do not reuse the public Data API key as an encryption key. The app requests only `youtube.upload` and `youtube.readonly`; refresh tokens and resumable session URLs are encrypted at rest. Uploads require a publisher role, an approved exact Shorts media revision, an explicit visibility selection, and a confirmation bound to the file SHA-256. Upload state is reconciled with YouTube before it can be marked complete. Production channel consent and a private test upload remain required before Stage 13 can be accepted.

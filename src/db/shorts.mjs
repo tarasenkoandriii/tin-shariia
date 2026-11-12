@@ -105,9 +105,13 @@ export async function getShortRender(db,identity,episodeId,id){
 
 export async function listShortRenders(db,identity,episodeId){
   await memberFor(db,identity);
-  const {rows}=await db.query(`SELECT id,episode_id,media_revision_id,episode_version,manifest,state,expected_bytes,sha256,error_code,expires_at,created_at,
-    audit_ffmpeg_id,technical_report,audit_media_revision_id
-    FROM shorts_renders WHERE episode_id=$1 AND expires_at>now() ORDER BY created_at DESC LIMIT 12`,[uuid(episodeId)]);
+  const {rows}=await db.query(`SELECT s.id,s.episode_id,s.media_revision_id,s.episode_version,s.manifest,s.state,s.expected_bytes,s.sha256,s.error_code,s.expires_at,s.created_at,
+    s.audit_ffmpeg_id,s.technical_report,s.audit_media_revision_id,u.id AS youtube_upload_id,u.state AS youtube_upload_state,
+    u.youtube_id AS youtube_video_id,u.privacy_status AS youtube_privacy_status,u.processing_status AS youtube_processing_status,
+    u.actual_privacy_status AS youtube_actual_privacy_status,u.error_code AS youtube_error_code,u.upload_offset AS youtube_upload_offset,
+    u.total_bytes AS youtube_total_bytes
+    FROM shorts_renders s LEFT JOIN youtube_short_uploads u ON u.media_revision_id=s.audit_media_revision_id
+    WHERE s.episode_id=$1 AND s.expires_at>now() ORDER BY s.created_at DESC LIMIT 12`,[uuid(episodeId)]);
   return rows;
 }
 
