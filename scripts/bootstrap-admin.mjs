@@ -1,4 +1,4 @@
-import { createClerkClient } from '@clerk/nextjs/server';
+import { createClerkClient } from '@clerk/backend';
 import { database } from '../src/db/runtime.mjs';
 import { bootstrapAdmin } from '../src/access/membership.mjs';
 

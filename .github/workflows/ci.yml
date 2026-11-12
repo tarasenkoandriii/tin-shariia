@@ -30,6 +30,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npm run db:migrate
       - run: npm run db:migrate
       - run: npm run lint
