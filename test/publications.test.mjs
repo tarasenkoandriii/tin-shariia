@@ -48,7 +48,7 @@ test('publication requires a current approval and freezes the package, metrics a
     const {rows:[media]}=await db.query(`INSERT INTO episode_media_revisions
       (episode_id,episode_version,uploaded_by,ordinal,pathname,expected_bytes,upload_until,expires_at,state,sha256,snapshot)
       VALUES($1,$2,(SELECT id FROM members WHERE clerk_user_id='pub-author'),1,'montage/pub.mp4',600,now()+interval '1 hour',
-        now()+interval '1 day','passed',repeat('a',64),$3::jsonb) RETURNING id`,
+        now()+interval '1 day','passed',repeat('a',64),$3::text::jsonb) RETURNING id`,
       [episode.id,episode.version,JSON.stringify({episodeVersion:episode.version})]);
     publication.mediaRevisionId=media.id;
     await assert.rejects(register(),/RELEASE_APPROVAL_REQUIRED/);
