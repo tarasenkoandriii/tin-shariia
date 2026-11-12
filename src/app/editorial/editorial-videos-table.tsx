@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 type Video = { id: string; youtubeId: string; createdAt: string };
 type SortKey = 'youtubeId' | 'createdAt';
@@ -16,10 +16,13 @@ const columns: { key: SortKey; label: string }[] = [
 
 function VideoPreview({ youtubeId }: { youtubeId: string }) {
   const [unavailable, setUnavailable] = useState(false);
+  const checkPreview = useCallback((image: HTMLImageElement | null) => {
+    if (image?.complete && image.naturalWidth < 128) setUnavailable(true);
+  }, []);
   return <span className="editorial-video-preview">
     {unavailable ? <span>Немає прев’ю</span> :
       /* eslint-disable-next-line @next/next/no-img-element -- Public YouTube thumbnail with a local fallback. */
-      <img src={`https://i.ytimg.com/vi/${encodeURIComponent(youtubeId)}/mqdefault.jpg`}
+      <img ref={checkPreview} src={`https://i.ytimg.com/vi/${encodeURIComponent(youtubeId)}/mqdefault.jpg`}
         width={128} height={72} alt="" loading="lazy" referrerPolicy="no-referrer"
         onLoad={event => {
           if (event.currentTarget.naturalWidth < 128) setUnavailable(true);
