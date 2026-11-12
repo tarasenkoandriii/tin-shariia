@@ -64,27 +64,34 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
         if(file.state==='FAILED') return failed('VIDEO_FILE_REJECTED');
         if(file.state!=='ACTIVE') return wait(progress);
         if(!file.uri) return failed('VIDEO_FILE_REJECTED');
-        video={uri:file.uri};
+        video={uri:progress.fileUri};
       }else{
         const source=await fetch(await sign(row,'get',15),{redirect:'error',signal:AbortSignal.timeout(40000)});
         if(!source.ok||Number(source.headers.get('content-length'))!==input.expectedBytes) return failed('VIDEO_FILE_REJECTED');
         if(input.expectedBytes>10_000_000){
           const file=await ai.files.upload({file:await source.blob(),config:{mimeType:'video/mp4'}});
-          if(!file.name) return failed('VIDEO_FILE_REJECTED');
-          return wait({...progress,fileName:file.name});
+          if(!file.name||!file.uri) return failed('VIDEO_FILE_REJECTED');
+          return wait({...progress,fileName:file.name,fileUri:file.uri});
         }
-        video={data:Buffer.from(await source.arrayBuffer()).toString('base64')};
+        const bytes=Buffer.from(await source.arrayBuffer());
+        video={data:bytes.toString('base64')};
       }
     }catch{return failed('VIDEO_FILE_REJECTED');}
     try{
-      const text=videoPrompt(input)+'\nПоверни один JSON-об’єкт без Markdown за схемою: '+JSON.stringify(videoResponseFormat.schema);
-      const result=await ai.interactions.create({
-        model,store:false,input:[{type:'video',...video,mime_type:'video/mp4'},{type:'text',text}],
-        generation_config:{max_output_tokens:videoOutputLimit,thinking_level:'low'},
-      },{...requestOptions,timeout:55000});
-      const usage=usageFor(result.usage);
-      if(result.status!=='completed') return usage?failed('VIDEO_PROVIDER_FAILED',usage):unknown('PROVIDER_USAGE_UNKNOWN');
-      return reportResult(result.output_text,input,usage,result.usage?.input_tokens_by_modality??[]);
+      const result=await ai.models.generateContent({
+        model,
+        contents:[{role:'user',parts:[
+          {...(video.uri?{fileData:{fileUri:video.uri,mimeType:'video/mp4'}}:
+              {inlineData:{data:video.data,mimeType:'video/mp4'}})},
+          {text:videoPrompt(input)+'\nПоверни один JSON-об’єкт без Markdown за схемою: '+JSON.stringify(videoResponseFormat.schema)},
+        ]}],
+        config:{maxOutputTokens:videoOutputLimit,thinkingConfig:{thinkingLevel:'LOW'},
+          responseMimeType:'application/json',responseJsonSchema:videoResponseFormat.schema,
+          httpOptions:{timeout:55000,retryOptions:{attempts:1}}},
+      });
+      const usage=result.usageMetadata;
+      const modalities=(usage?.promptTokensDetails??[]).map(item=>({modality:item.modality,tokens:item.tokenCount}));
+      return reportResult(result.text,input,usageFor(usage),modalities);
     }catch(error){
       if(error?.status===429) return failed("PROVIDER_UNAVAILABLE");
       if(error?.status>=400&&error.status<500&&error.status!==408){
