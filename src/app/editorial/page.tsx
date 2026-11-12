@@ -22,6 +22,7 @@ export default async function Editorial() {
   return <main>
     <UserButton />
     <h1>Редакція «Тінь Шарія»</h1>
+    <p><Link href="/editorial/youtube-channel">Останні випуски каналу Шарія · YouTube</Link></p>
     <section><h2>Відео</h2>
       {member.roles.includes("author") && <VideoForm />}
       {videos.length ? <ul>{videos.map((video: { id: string; youtube_id: string }) => <li key={video.id}>

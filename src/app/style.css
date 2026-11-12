@@ -22,3 +22,13 @@ form input { max-width: 100%; }
 summary { cursor: pointer; margin-block: .5rem; }
 .video-player { width: 100%; aspect-ratio: 16/9; border: 0; }
 .transcript-preview { max-height: 24rem; overflow: auto; }
+.channel-sort { display: grid; gap: .35rem; max-width: 28rem; margin-block: 1rem; }
+.channel-sort select { font: inherit; padding: .55rem; }
+.channel-video-list { list-style: none; padding: 0; }
+.channel-video-card { display: grid; grid-template-columns: minmax(10rem, 16rem) 1fr; gap: 1rem; border: 1px solid #3d4b54; border-radius: .75rem; margin-block: 1rem; padding: .8rem; }
+.channel-video-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: .4rem; }
+.channel-video-content { min-width: 0; }
+.channel-video-content h2 { margin: 0 0 .4rem; font-size: 1.1rem; line-height: 1.35; }
+.channel-video-stats { color: #b5c2c9; margin: .35rem 0 .8rem; }
+.channel-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; margin-block: 1.5rem; }
+@media (max-width: 38rem) { .channel-video-card { grid-template-columns: 1fr; } }
