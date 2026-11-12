@@ -7,9 +7,9 @@ const requestOptions={maxRetries:0,timeout:25000};
 const statesWaiting=new Set(['in_progress','queued','pending','running']);
 
 function usageFor(interaction){
-  const usage=interaction.usage;
-  const input=usage?.total_input_tokens;
-  const output=(usage?.total_output_tokens??0)+(usage?.total_thought_tokens??0);
+  const input=interaction?.promptTokenCount??interaction?.total_input_tokens;
+  const output=(interaction?.candidatesTokenCount??interaction?.total_output_tokens??0)
+    +(interaction?.thoughtsTokenCount??interaction?.total_thought_tokens??0);
   return Number.isSafeInteger(input)&&Number.isSafeInteger(output)&&input>=0&&output>=0 ? {input,output} : null;
 }
 
@@ -21,14 +21,10 @@ function makeClient(env){
   return new GoogleGenAI({apiKey:env.GEMINI_API_KEY,httpOptions:{timeout:95000,retryOptions:{attempts:1}}});
 }
 
-function interactionResult(interaction,input){
-  const usage=usageFor(interaction);
+function reportResult(raw,input,usage,modalities){
   if(!usage) return unknown('PROVIDER_USAGE_UNKNOWN');
-  if(interaction.status!=='completed') return failed('VIDEO_PROVIDER_FAILED',usage);
-  const raw=interaction.output_text??interaction.steps?.filter(step=>step.type==='model_output')
-    .at(-1)?.content?.filter(item=>item.type==='text').map(item=>item.text).join('');
   try{
-    const report=validateVideoAudit(JSON.parse(raw),input,interaction.usage.input_tokens_by_modality??[]);
+    const report=validateVideoAudit(JSON.parse(raw),input,modalities);
     return {type:'success',usage,drafts:report};
   }catch(error){
     return failed(error.message?.startsWith('VIDEO_')?error.message:'PROVIDER_RESPONSE_INVALID',usage);
@@ -48,7 +44,9 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
       try{
         const current=await ai.interactions.get(progress.interactionId,{},requestOptions);
         if(statesWaiting.has(current.status)) return wait(progress);
-        return interactionResult(current,input);
+        const usage=usageFor(current.usage);
+        if(current.status!=='completed') return usage?failed('VIDEO_PROVIDER_FAILED',usage):unknown('PROVIDER_USAGE_UNKNOWN');
+        return reportResult(current.output_text,input,usage,current.usage?.input_tokens_by_modality??[]);
       }catch(error){
         return error?.status===404 ? unknown('PROVIDER_OUTCOME_UNKNOWN') : wait(progress,15);
       }
@@ -76,14 +74,16 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
       }
     }catch{return failed('VIDEO_FILE_REJECTED');}
     try{
-      const interaction=await ai.interactions.create({
-        model,store:false,
-        input:[{type:'video',uri,mime_type:'video/mp4'},
-          {type:'text',text:videoPrompt(input)}],
-        generation_config:{max_output_tokens:videoOutputLimit,thinking_level:'low'},
-        response_format:videoResponseFormat,
-      },{...requestOptions,timeout:55000});
-      return interactionResult(interaction,input);
+      const result=await ai.models.generateContent({
+        model,
+        contents:[{role:'user',parts:[{fileData:{fileUri:uri,mimeType:'video/mp4'}},{text:videoPrompt(input)}]}],
+        config:{maxOutputTokens:videoOutputLimit,thinkingConfig:{thinkingLevel:'LOW'},
+          responseMimeType:'application/json',responseJsonSchema:videoResponseFormat.schema,
+          httpOptions:{timeout:55000,retryOptions:{attempts:1}}},
+      });
+      const usage=result.usageMetadata;
+      const modalities=(usage?.promptTokensDetails??[]).map(item=>({modality:item.modality,tokens:item.tokenCount}));
+      return reportResult(result.text,input,usageFor(usage),modalities);
     }catch(error){
       if(error?.status===429) return failed("PROVIDER_UNAVAILABLE");
       if(error?.status>=400&&error.status<500&&error.status!==408){
