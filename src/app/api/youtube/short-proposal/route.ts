@@ -1,3 +1,4 @@
+import { youtubeErrorDetails } from '../../../../analysis/youtube-error-details';
 import { activeMember } from '../../../../access/membership.mjs';
 import { publicationError, publicationIdentity, publicationInput, publicationReply } from '../../../../access/publication-http';
 import { analysisConfig } from '../../../../analysis/config.mjs';
@@ -60,7 +61,8 @@ export async function POST(request: Request) {
           : status === 429 ? 'YOUTUBE_ANALYSIS_QUOTA'
           : name === 'TimeoutError' || name === 'AbortError' ? 'YOUTUBE_ANALYSIS_TIMEOUT'
           : 'SHORTS_PROPOSAL_UNKNOWN';
-        console.warn('YOUTUBE_SHORT_PROPOSAL_FAILED', { code, providerStatus: typeof status === 'number' ? status : null });
+        console.warn('YOUTUBE_SHORT_PROPOSAL_FAILED', { code, providerStatus: typeof status === 'number' ? status : null,
+          ...youtubeErrorDetails(error) });
         throw Error(code);
       }
       throw error;
