@@ -64,7 +64,7 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
         if(file.state==='FAILED') return failed('VIDEO_FILE_REJECTED');
         if(file.state!=='ACTIVE') return wait(progress);
         if(!file.uri) return failed('VIDEO_FILE_REJECTED');
-        video={uri:progress.fileUri};
+        video={uri:file.uri};
       }else{
         const source=await fetch(await sign(row,'get',15),{redirect:'error',signal:AbortSignal.timeout(40000)});
         if(!source.ok||Number(source.headers.get('content-length'))!==input.expectedBytes) return failed('VIDEO_FILE_REJECTED');
