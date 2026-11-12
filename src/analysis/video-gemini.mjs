@@ -86,8 +86,7 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
           {text:videoPrompt(input)+'\nПоверни один JSON-об’єкт без Markdown за схемою: '+JSON.stringify(videoResponseFormat.schema)},
         ]}],
         config:{maxOutputTokens:videoOutputLimit,thinkingConfig:{thinkingLevel:'LOW'},
-          responseMimeType:'application/json',responseJsonSchema:videoResponseFormat.schema,
-          httpOptions:{timeout:55000,retryOptions:{attempts:1}}},
+          responseMimeType:'application/json',responseJsonSchema:videoResponseFormat.schema},
       });
       const usage=result.usageMetadata;
       const modalities=(usage?.promptTokensDetails??[]).map(item=>({modality:item.modality,tokens:item.tokenCount}));
