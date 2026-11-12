@@ -29,7 +29,7 @@ async function saveClaim(db, item, actorId, input) {
     if (!transcript) throw new Error('TRANSCRIPT_MISMATCH');
   }
   await db.query(
-    'INSERT INTO claim_versions (claim_id,version,author_id,transcript_id,content) VALUES ($1,$2,$3,$4,$5)',
+    'INSERT INTO claim_versions (claim_id,version,author_id,transcript_id,content) VALUES ($1,$2,$3,$4,$5::text::jsonb)',
     [item.id, item.version, actorId, transcriptId, JSON.stringify(content)],
   );
   for (const [position, source] of evidence.entries()) {
@@ -42,7 +42,7 @@ async function saveClaim(db, item, actorId, input) {
       [source.url, source.title, source.organization, source.publicationDate, source.accessedOn, source.primaryUrl],
     );
     await db.query(
-      'INSERT INTO claim_evidence (claim_id,claim_version,position,source_id,snapshot) VALUES ($1,$2,$3,$4,$5)',
+      'INSERT INTO claim_evidence (claim_id,claim_version,position,source_id,snapshot) VALUES ($1,$2,$3,$4,$5::text::jsonb)',
       [item.id, item.version, position, id, JSON.stringify(source)],
     );
   }
@@ -52,7 +52,7 @@ async function saveEpisode(db, item, actorId, input) {
   const claim = await lockClaim(db, item.claim_id);
   if (input.claimVersion !== claim.version) throw new Error('CLAIM_STALE');
   await db.query(
-    'INSERT INTO episode_versions (episode_id,version,author_id,claim_id,claim_version,content) VALUES ($1,$2,$3,$4,$5,$6)',
+    'INSERT INTO episode_versions (episode_id,version,author_id,claim_id,claim_version,content) VALUES ($1,$2,$3,$4,$5,$6::text::jsonb)',
     [item.id, item.version, actorId, claim.id, claim.version, JSON.stringify(episodeInput(input))],
   );
 }

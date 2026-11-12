@@ -37,7 +37,7 @@ export async function importTranscript(db, { videoId, bytes, format, durationMs 
       `INSERT INTO transcript_segments (transcript_id, position, start_ms, end_ms, body)
        SELECT $1, (ordinality - 1)::integer, (cue->>'startMs')::bigint,
               (cue->>'endMs')::bigint, cue->>'text'
-       FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS segment(cue, ordinality)`,
+       FROM jsonb_array_elements($2::text::jsonb) WITH ORDINALITY AS segment(cue, ordinality)`,
       [transcript.id, JSON.stringify(segments)],
     );
     return transcript;

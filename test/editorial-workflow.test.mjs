@@ -3,15 +3,17 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 import { registerVideo, importTranscript } from '../src/db/editorial-import.mjs';
+import { database } from '../src/db/runtime.mjs';
 import { loadWorkflow } from '../src/db/editorial-workflow.mjs';
 import { editorialMutation } from '../src/http/editorial-workflow.mjs';
 
 const origin='https://editorial.example.test';
 
 test('editorial HTTP workflow enforces revisions, independent approvals and evidence snapshots', async () => {
-  const db=new PGlite();
+  const native=process.env.RUN_POSTGRES_TESTS==='1';
+  const db=native ? await database() : new PGlite();
   try {
-    for (const filename of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow']) {
+    if (!native) for (const filename of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow']) {
       await db.exec(await readFile(new URL('../drizzle/'+filename+'.sql',import.meta.url),'utf8'));
     }
     for (const [identity, roles] of [['writer',['author','factchecker','editor']],['checker',['factchecker']],['editor',['editor']],['admin',['admin']]]) {
@@ -85,5 +87,5 @@ test('editorial HTTP workflow enforces revisions, independent approvals and evid
     assert.ok(done.events.some(e=>e.comment==='Уточніть висновок'));
     await db.query("UPDATE members SET revoked_at=now() WHERE clerk_user_id='editor'");
     await assert.rejects(loadWorkflow(db,'editor',video.id),/FORBIDDEN/);
-  } finally { await db.close(); }
+  } finally { if (!native) await db.close(); }
 });
