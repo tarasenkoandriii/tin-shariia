@@ -78,6 +78,7 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
       }
     }catch{return failed('VIDEO_FILE_REJECTED');}
     try{
+      const outputSchema={type:'OBJECT',properties:{audioAvailable:{type:'BOOLEAN'},visualAvailable:{type:'BOOLEAN'},summary:{type:'STRING'},coverage:{type:'ARRAY',items:{type:'OBJECT',properties:{interval:{type:'INTEGER'},audio:{type:'STRING'},visual:{type:'STRING'}},required:['interval','audio','visual']}},findings:{type:'ARRAY',items:{type:'OBJECT',properties:{category:{type:'STRING',enum:['speech','pronunciation','pauses','overlap','music','subtitles','quote','attribution','context','conclusion','unsupported','metadata']},severity:{type:'STRING',enum:['critical','major','minor']},startMs:{type:'INTEGER',nullable:true},endMs:{type:'INTEGER',nullable:true},field:{type:'STRING',nullable:true},sourceIndex:{type:'INTEGER',nullable:true},observation:{type:'STRING'},fix:{type:'STRING'}},required:['category','severity','startMs','endMs','field','sourceIndex','observation','fix']}}},required:['audioAvailable','visualAvailable','summary','coverage','findings']};
       const result=await ai.models.generateContent({
         model,
         contents:[{role:'user',parts:[
@@ -86,7 +87,7 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
           {text:videoPrompt(input)+'\nПоверни один JSON-об’єкт без Markdown за схемою: '+JSON.stringify(videoResponseFormat.schema)},
         ]}],
         config:{maxOutputTokens:videoOutputLimit,thinkingConfig:{thinkingLevel:'LOW'},
-          responseMimeType:'application/json',responseJsonSchema:videoResponseFormat.schema},
+          responseMimeType:'application/json',responseSchema:outputSchema},
       });
       const usage=result.usageMetadata;
       const modalities=(usage?.promptTokensDetails??[]).map(item=>({modality:item.modality,tokens:item.tokenCount}));
