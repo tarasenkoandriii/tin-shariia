@@ -4,6 +4,9 @@ import { bootstrapAdmin } from '../src/access/membership.mjs';
 
 const userId = process.argv[2];
 if (!userId || !process.env.CLERK_SECRET_KEY) throw new Error('CLERK_USER_AND_SECRET_REQUIRED');
+if (process.env.APP_STAGE === 'production' && !process.env.CLERK_SECRET_KEY.startsWith('sk_live_')) {
+  throw new Error('PRODUCTION_CLERK_KEYS_REQUIRED');
+}
 const user = await createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY }).users.getUser(userId);
 const email = user.emailAddresses.find(address => address.id === user.primaryEmailAddressId
   && address.verification?.status === 'verified')?.emailAddress;

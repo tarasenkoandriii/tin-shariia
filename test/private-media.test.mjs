@@ -56,7 +56,11 @@ test('private HTTP delivery supplies a complete clip for audio audit and rejects
   assert.equal(report.durationMs, 2000);
   assert.ok(Number.isFinite(report.integratedLufs));
   assert.ok(Number.isFinite(report.truePeakDbfs));
-  assert.deepEqual(report.silence, [{ startMs: 1000, endMs: 2000 }]);
+  assert.equal(report.silence.length, 1);
+  const [{ startMs, endMs }] = report.silence;
+  // FFmpeg versions can report up to one decoded AAC frame of padding.
+  assert.ok(Math.abs(startMs - 1000) <= 24);
+  assert.ok(Math.abs(endMs - 2000) <= 24);
   now = 2000;
   assert.equal((await fetch(authorizedUrl)).status, 403);
   assert.equal(reads, 1);
