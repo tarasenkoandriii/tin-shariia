@@ -7,6 +7,11 @@ import { verdictLabels } from './workflow-types';
 import type { Claim, Evidence, Episode, Transcript } from './workflow-types';
 
 const messages: Record<string, string> = {
+  APPROVAL_REQUIRED: "Потрібен погоджений сценарій цієї версії.",
+  PUBLICATION_CONFLICT: "Цей випуск або YouTube-ролик уже зареєстровано з іншими даними.",
+  METRIC_TOO_EARLY: "Заміри доступні після завершення відповідного періоду.",
+  METRIC_CONFLICT: "Заміри вже містять новіші або інші дані за цей час.",
+  EPISODE_PUBLISHED: "Опублікований сценарій збережено. Для змін створіть виправлення.",
   AUTH_REQUIRED: 'Увійдіть знову.',
   FORBIDDEN: 'Для цієї дії потрібна відповідна роль.',
   SELF_APPROVAL: 'Потрібен незалежний перевіряльник.',
@@ -19,7 +24,7 @@ const messages: Record<string, string> = {
   INVALID_INPUT: 'Перевірте заповнені поля.',
 };
 
-function useRequest() {
+export function useRequest() {
   const router = useRouter();
   const [state, setState] = useState({ pending: false, message: '' });
   async function send(path: string, init: RequestInit, done?: (id: string) => void) {
@@ -39,7 +44,7 @@ function useRequest() {
   return { ...state, send };
 }
 
-function json(body: object, method = 'POST') {
+export function json(body: object, method = 'POST') {
   return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 

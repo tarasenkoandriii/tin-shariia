@@ -13,7 +13,7 @@ test('editorial HTTP workflow enforces revisions, independent approvals and evid
   const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
   const db=native ? await database() : new PGlite();
   try {
-    if (!native) for (const filename of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow']) {
+    if (!native) for (const filename of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0004_publication_records']) {
       await db.exec(await readFile(new URL('../drizzle/'+filename+'.sql',import.meta.url),'utf8'));
     }
     for (const [identity, roles] of [['writer',['author','factchecker','editor']],['checker',['factchecker']],['editor',['editor']],['admin',['admin']]]) {

@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { loadPublications } from '../../../../db/publications.mjs';
+import { PublicationPanel, type Publication } from '../../publication-panel';
 import { AnalysisPanel } from '../../analysis-panel';
 import { notFound, redirect } from 'next/navigation';
 import { clerkId } from '../../../../access/session';
@@ -65,6 +67,8 @@ export default async function VideoPage({ params, searchParams }: {
   });
   if (!workflow.video) notFound();
   const video = workflow.video;
+  const publications: Publication[] = await loadPublications(db,id,videoId);
+  const byEpisode = new Map(publications.map(publication=>[publication.episode_id,publication]));
   const author = workflow.roles.includes('author');
   const transcripts: Transcript[] = workflow.transcripts;
   const claims: Claim[] = workflow.claims;
@@ -124,17 +128,18 @@ export default async function VideoPage({ params, searchParams }: {
         {author && claim.status==='approved' && <details><summary>Новий сценарій</summary><EpisodeForm claim={claim} /></details>}
         {episodes.filter(episode=>episode.claim_id===claim.id).map(episode=><article className="workflow-card" key={episode.id}>
           <h5>{episode.content.title}</h5>
-          <p>{episode.stale?'Потрібне повторне погодження':statuses[episode.status]} · версія {episode.version} · ревізія {episode.revision} · твердження {episode.claim_version}</p>
+          <p>{byEpisode.has(episode.id)?'Опубліковано':episode.stale?'Потрібне повторне погодження':statuses[episode.status]} · версія {episode.version} · ревізія {episode.revision} · твердження {episode.claim_version}</p>
           <p className="workflow-text">{episode.content.script}</p>
           <details><summary>Матеріали сценарію</summary>
             {Object.entries(episode.content).filter(([key,value])=>!['title','script'].includes(key)&&value)
               .map(([key,value])=><p className="workflow-text" key={key}>{value}</p>)}
           </details>
-          <Transitions collection="episodes" item={episode}
-            actions={actions(episode.status,author,workflow.roles.includes('editor'),false,episode.stale)} />
-          {author && claim.status==='approved' && <details><summary>Редагувати сценарій</summary>
+          {!byEpisode.has(episode.id) && <Transitions collection="episodes" item={episode}
+            actions={actions(episode.status,author,workflow.roles.includes('editor'),false,episode.stale)} />}
+          {author && claim.status==='approved' && !byEpisode.has(episode.id) && <details><summary>Редагувати сценарій</summary>
             <EpisodeForm key={episode.revision} claim={claim} episode={episode} />
           </details>}
+          <PublicationPanel episode={episode} publication={byEpisode.get(episode.id)} roles={workflow.roles} />
         </article>)}
       </article>)}
     </section>

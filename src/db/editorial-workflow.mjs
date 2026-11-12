@@ -96,6 +96,10 @@ export function changeEditorial(db, identity, kind, input) {
         `SELECT * FROM ${config.table} WHERE id = $1 FOR UPDATE`, [uuid(input.id)],
       ));
       if (!item) throw new Error('NOT_FOUND');
+      if (kind === 'episode') {
+        const { rows } = await tx.query('SELECT id FROM publications WHERE episode_id=$1',[item.id]);
+        if (rows.length) throw new Error('EPISODE_PUBLISHED');
+      }
       if (input.expectedRevision !== item.revision || input.version !== item.version) throw new Error('REVISION_CONFLICT');
       if (item.status === 'withdrawn') throw new Error('INVALID_TRANSITION');
       if (action === 'edit') {
