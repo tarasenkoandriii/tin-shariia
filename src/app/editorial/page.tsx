@@ -5,6 +5,8 @@ import { activeMember, listAccess } from '../../access/membership.mjs';
 import { clerkId } from '../../access/session';
 import { database } from '../../db/runtime.mjs';
 import { CancelInviteForm, InviteForm, MemberForm } from './forms';
+import { loadWorkflow } from "../../db/editorial-workflow.mjs";
+import { VideoForm } from "./workflow-controls";
 
 export const dynamic = 'force-dynamic';
 
@@ -15,10 +17,17 @@ export default async function Editorial() {
   const member = await activeMember(db, id);
   if (!member) return <main><UserButton /><h1>Доступ до редакції закрито</h1><Link href="/invite">Маю запрошення</Link></main>;
   const access = member.roles.includes('admin') ? await listAccess(db, id) : null;
+  const { videos } = await loadWorkflow(db, id);
 
   return <main>
     <UserButton />
     <h1>Редакція «Тінь Шарія»</h1>
+    <section><h2>Відео</h2>
+      {member.roles.includes("author") && <VideoForm />}
+      {videos.length ? <ul>{videos.map((video: { id: string; youtube_id: string }) => <li key={video.id}>
+        <Link href={"/editorial/videos/"+video.id}>{video.youtube_id}</Link>
+      </li>)}</ul> : <p>Відео ще немає.</p>}
+    </section>
     {access && <>
       <h2>Запросити учасника</h2>
       <InviteForm />

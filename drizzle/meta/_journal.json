@@ -2,7 +2,26 @@
   "version": "7",
   "dialect": "postgresql",
   "entries": [
-    { "idx": 0, "version": "7", "when": 1794441600000, "tag": "0000_editorial_import", "breakpoints": false },
-    { "idx": 1, "version": "7", "when": 1794441600001, "tag": "0001_editorial_access", "breakpoints": false }
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1794441600000,
+      "tag": "0000_editorial_import",
+      "breakpoints": false
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794441600001,
+      "tag": "0001_editorial_access",
+      "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794441600002,
+      "tag": "0002_editorial_workflow",
+      "breakpoints": false
+    }
   ]
 }
