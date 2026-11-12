@@ -1,3 +1,4 @@
+import {monthlyAnalysisBudget} from './monthly-budget.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { activeMember } from '../access/membership.mjs';
 import { videoOutputLimit, videoPrompt, videoPromptVersion } from './video-input.mjs';
@@ -78,11 +79,7 @@ function enqueue(db,identity,input,config,resolveSource){
     );
     if (counts.total>=2||counts.actor>=1) throw Error('CONCURRENCY_LIMIT');
     const {chunks,reserve}=await source.work();
-    const {rows:[budget]}=await tx.query(
-      `SELECT date_trunc('month',now() AT TIME ZONE 'UTC')::date AS month,
-       COALESCE(sum(CASE WHEN status='settled' THEN spent_micros ELSE GREATEST(reserved_micros,spent_micros) END),0) AS used
-       FROM budget_reservations WHERE month=date_trunc('month',now() AT TIME ZONE 'UTC')::date`,
-    );
+    const budget=await monthlyAnalysisBudget(tx);
     if (Number(budget.used)+reserve>config.monthlyMicros) throw Error('BUDGET_EXHAUSTED');
     const attempt=existing?existing.attempt+1:1;
     let id=existing?.id;

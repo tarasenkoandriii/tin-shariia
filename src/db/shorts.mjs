@@ -1,3 +1,4 @@
+import {monthlyAnalysisBudget} from '../analysis/monthly-budget.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {activeMember} from '../access/membership.mjs';
 import {uuid} from '../editorial/workflow-input.mjs';
@@ -47,10 +48,12 @@ export async function reserveShortsProposal(db,identity,episodeId,input,config){
   episodeId=uuid(episodeId);
   const mediaId=uuid(input.mediaId),requestKey=uuid(input.requestId);
   return db.transaction(async tx=>{
-    await tx.query('SELECT pg_advisory_xact_lock(72036600)');
+    await tx.query('SELECT pg_advisory_xact_lock(72036593)');
     const member=await memberFor(tx,identity,true);
-    const {rows:[existing]}=await tx.query('SELECT id,state,plan FROM shorts_plan_calls WHERE request_key=$1',[requestKey]);
+    const {rows:[existing]}=await tx.query('SELECT id,state,plan,requested_by,episode_id,media_revision_id FROM shorts_plan_calls WHERE request_key=$1',[requestKey]);
     if(existing){
+      if(existing.requested_by!==member.id||existing.episode_id!==episodeId||existing.media_revision_id!==mediaId)
+        throw Error('INVALID_INPUT');
       if(existing.state==='succeeded') return {cached:true,id:existing.id,plan:existing.plan};
       throw Error(existing.state==='unknown'?'SHORTS_PROPOSAL_UNKNOWN':'SHORTS_PROPOSAL_PENDING');
     }
@@ -74,11 +77,7 @@ export async function reserveShortsProposal(db,identity,episodeId,input,config){
     const serialized=JSON.stringify(context);
     if(Buffer.byteLength(serialized)>96_000) throw Error('TRANSCRIPT_TOO_LARGE');
     const reserve=Math.ceil(Buffer.byteLength(serialized)/3.5+1800)*config.inputRate+4096*config.outputRate;
-    const {rows:[budget]}=await tx.query(`SELECT
-      COALESCE((SELECT sum(CASE WHEN status='settled' THEN spent_micros ELSE GREATEST(reserved_micros,spent_micros) END)
-        FROM budget_reservations WHERE month=date_trunc('month',now() AT TIME ZONE 'UTC')::date),0)
-      +COALESCE((SELECT sum(CASE WHEN state='succeeded' THEN spent_micros ELSE reserved_micros END)
-        FROM shorts_plan_calls WHERE month=date_trunc('month',now() AT TIME ZONE 'UTC')::date AND state IN ('running','succeeded','unknown')),0) AS used`);
+    const budget=await monthlyAnalysisBudget(tx);
     if(Number(budget.used)+reserve>config.monthlyMicros) throw Error('BUDGET_EXHAUSTED');
     const {rows:[call]}=await tx.query(`INSERT INTO shorts_plan_calls
       (episode_id,media_revision_id,requested_by,request_key,month,model,reserved_micros,state)
