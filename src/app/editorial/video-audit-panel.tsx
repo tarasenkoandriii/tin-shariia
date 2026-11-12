@@ -43,7 +43,7 @@ const categories:Record<string,string>={
 const severities:Record<string,string>={critical:'Критичне',major:'Суттєве',minor:'Незначне'};
 const seconds=(ms:number)=>new Intl.NumberFormat('uk-UA',{maximumFractionDigits:3}).format(ms/1000)+' с';
 
-export function VideoAuditPanel({endpoint,canRun,canReview}:{endpoint:string;canRun:boolean;canReview:boolean}){
+export function VideoAuditPanel({endpoint,canRun,canReview,short=false}:{endpoint:string;canRun:boolean;canReview:boolean;short?:boolean}){
   const [jobs,setJobs]=useState<Job[]>([]);
   const [message,setMessage]=useState('');
   const [pending,setPending]=useState(false);
@@ -88,14 +88,14 @@ export function VideoAuditPanel({endpoint,canRun,canReview}:{endpoint:string;can
       const refreshed=await fetch(endpoint,{cache:'no-store'});
       if(!refreshed.ok) throw Error('AUDIT_LIST_FAILED');
       setJobs((await refreshed.json()).data);
-      setMessage(input.action==='approve'?'Ревізію монтажу допущено до реєстрації публікації.':'Рішення редактора збережено.');
+      setMessage(input.action==='approve'?(short?'Shorts допущено до наступного етапу.':'Ревізію монтажу допущено до реєстрації публікації.'):'Рішення редактора збережено.');
     }catch(error){setMessage(messages[(error as Error).message]??'Не вдалося зберегти рішення редактора.');}
     finally{setPending(false);}
   }
 
-  return <details><summary>Аудит відео та звуку Gemini</summary>
+  return <details><summary>{short?'Аудит Shorts: звук, відеоряд і контекст Gemini':'Аудит відео та звуку Gemini'}</summary>
     {canRun&&jobs.length===0&&<form onSubmit={event=>{event.preventDefault();void run({});}}>
-      <label><input type="checkbox" required /> Передати цей MP4 і пакет сценарію Gemini в межах спільного бюджету.</label>
+      <label><input type="checkbox" required /> Передати цей MP4 і {short?'метадані Shorts та пакет джерела':'пакет сценарію'} Gemini в межах спільного бюджету.</label>
       <button disabled={pending}>Запустити аудит</button>
     </form>}
     {message&&<output role="status">{message}</output>}
@@ -119,7 +119,7 @@ export function VideoAuditPanel({endpoint,canRun,canReview}:{endpoint:string;can
           <strong>{seconds(row.startMs)} – {seconds(row.endMs)}</strong>
           <p>Звук: {row.audio}</p><p>Відеоряд: {row.visual}</p>
         </li>)}</ul>
-        {report.reviewedAt&&<p>Ревізію допущено редактором · {new Intl.DateTimeFormat('uk-UA',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Kyiv'}).format(new Date(report.reviewedAt))}</p>}
+      {report.reviewedAt&&<p>{short?'Shorts допущено до наступного етапу':'Ревізію допущено редактором'} · {new Intl.DateTimeFormat('uk-UA',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Kyiv'}).format(new Date(report.reviewedAt))}</p>}
         {report.findings.length===0?<p>Gemini не запропонував зауважень.</p>:<ol>{report.findings.map(({finding,position,review:decision})=><li key={position}>
           <strong>{severities[finding.severity]} · {categories[finding.category]}</strong>
           <p>{finding.startMs!==null&&finding.endMs!==null?
@@ -136,7 +136,7 @@ export function VideoAuditPanel({endpoint,canRun,canReview}:{endpoint:string;can
           </form>}
         </li>)}</ol>}
         {canReview&&report.attempt===job.attempt&&job.status==='succeeded'&&!report.reviewedAt&&<button disabled={pending}
-          onClick={()=>void review({action:'approve'})}>Допустити цю ревізію до публікації</button>}
+          onClick={()=>void review({action:'approve'})}>{short?'Допустити Shorts до наступного етапу':'Допустити цю ревізію до публікації'}</button>}
       </details>)}
     </article>)}
   </details>;

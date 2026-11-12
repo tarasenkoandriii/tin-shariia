@@ -32,7 +32,7 @@ export async function initShortRender(db,identity,episodeId,input){
     if(existing) return existing;
     const {rows:[budget]}=await tx.query(`SELECT COALESCE((SELECT sum(expected_bytes) FROM episode_media_revisions
       WHERE expires_at>now() AND state<>'expired'),0)+COALESCE((SELECT sum(expected_bytes) FROM shorts_renders
-      WHERE expires_at>now() AND state NOT IN ('failed','expired')),0) AS used`);
+      WHERE expires_at>now() AND state<>'expired'),0) AS used`);
     if(Number(budget.used)+128*1024*1024>MAX_STORED_BYTES) throw Error('MONTAGE_STORAGE_LIMIT');
     const id=randomUUID();
     const {rows:[row]}=await tx.query(`INSERT INTO shorts_renders
@@ -105,16 +105,44 @@ export async function getShortRender(db,identity,episodeId,id){
 
 export async function listShortRenders(db,identity,episodeId){
   await memberFor(db,identity);
-  const {rows}=await db.query(`SELECT id,episode_id,media_revision_id,episode_version,manifest,state,expected_bytes,sha256,error_code,expires_at,created_at
+  const {rows}=await db.query(`SELECT id,episode_id,media_revision_id,episode_version,manifest,state,expected_bytes,sha256,error_code,expires_at,created_at,
+    audit_ffmpeg_id,technical_report,audit_media_revision_id
     FROM shorts_renders WHERE episode_id=$1 AND expires_at>now() ORDER BY created_at DESC LIMIT 12`,[uuid(episodeId)]);
   return rows;
 }
 
 export async function updateShortRender(db,id,token,values){
   const {rows:[row]}=await db.query(`UPDATE shorts_renders SET state=$3,ffmpeg_id=COALESCE($4,ffmpeg_id),
-    pathname=COALESCE($5,pathname),expected_bytes=COALESCE($6,expected_bytes),sha256=COALESCE($7,sha256),error_code=$8,
-    run_lease=$9 WHERE id=$1 AND run_token=$2 RETURNING id`,
-  [id,token,values.state,values.ffmpegId??null,values.pathname??null,values.bytes??null,values.sha256??null,
+    audit_ffmpeg_id=COALESCE($5,audit_ffmpeg_id),pathname=COALESCE($6,pathname),expected_bytes=COALESCE($7,expected_bytes),
+    sha256=COALESCE($8,sha256),technical_report=COALESCE($9::text::jsonb,technical_report),
+    audit_media_revision_id=COALESCE($10,audit_media_revision_id),error_code=$11,run_lease=$12
+    WHERE id=$1 AND run_token=$2 RETURNING id`,
+  [id,token,values.state,values.ffmpegId??null,values.auditFfmpegId??null,values.pathname??null,values.bytes??null,
+    values.sha256??null,values.technicalReport?json(values.technicalReport):null,values.auditMediaRevisionId??null,
     values.errorCode??null,values.lease??null]);
   return Boolean(row);
+}
+
+export async function createShortAuditMedia(db,id,token,technicalReport){
+  return db.transaction(async tx=>{
+    const {rows:[short]}=await tx.query(`SELECT s.*,m.snapshot AS source_snapshot,e.status AS episode_status,e.version AS current_version,
+      c.status AS claim_status,c.version AS current_claim_version
+      FROM shorts_renders s JOIN episode_media_revisions m ON m.id=s.media_revision_id
+      JOIN episodes e ON e.id=s.episode_id JOIN claims c ON c.id=e.claim_id
+      WHERE s.id=$1 AND s.run_token=$2 AND s.state='technical_check' AND s.run_lease>now()
+      FOR UPDATE OF s,m,e,c`,[uuid(id),uuid(token)]);
+    if(!short) return null;
+    if(short.audit_media_revision_id) return short.audit_media_revision_id;
+    if(short.episode_status!=='approved'||short.claim_status!=='approved'||short.episode_version!==short.current_version
+      ||short.source_snapshot.claimVersion!==short.current_claim_version) throw Error('MEDIA_STALE');
+    const snapshot={...short.source_snapshot,short:{hook:short.manifest.hook,title:short.manifest.title,
+      description:short.manifest.description,durationMs:short.manifest.durationMs,clips:short.manifest.clips}};
+    const {rows:[media]}=await tx.query(`INSERT INTO episode_media_revisions
+      (episode_id,episode_version,uploaded_by,ordinal,pathname,expected_bytes,upload_until,expires_at,snapshot,state,sha256,report,kind)
+      SELECT $1,$2,$3,COALESCE(MAX(ordinal),0)+1,$4,$5,now(),$6,$7::text::jsonb,'passed',$8,$9::text::jsonb,'short'
+      FROM episode_media_revisions WHERE episode_id=$1 RETURNING id`,
+    [short.episode_id,short.episode_version,short.created_by,short.pathname,short.expected_bytes,short.expires_at,json(snapshot),
+      short.sha256,json(technicalReport)]);
+    return media.id;
+  });
 }

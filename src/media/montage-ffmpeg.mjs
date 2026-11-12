@@ -47,6 +47,14 @@ export function montageReport(job,text,expectedBytes){
   }};
 }
 
+export function validateShortTechnicalReport(job,text,expectedBytes,expectedSha256){
+  const measured=montageReport(job,text,expectedBytes);
+  const report=measured.report;
+  if(measured.sha256!==expectedSha256||report.width!==1080||report.height!==1920
+    ||report.durationMs<30_000||report.durationMs>60_000) throw Error('SHORTS_TECH_CHECK_REJECTED');
+  return report;
+}
+
 export function shortsOutput(job,origin){
   if(!job?.id||!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(job.id)) throw Error('SHORTS_RENDER_INVALID');
   let url;
@@ -83,6 +91,10 @@ export function ffmpegMontage(env=process.env){
     submitShorts:(key,source,manifest)=>request('/api/ffmpeg',{
       method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},
       body:JSON.stringify(shortsRenderJob(source,manifest)),
+    }),
+    submitAudit:(key,source)=>request('/api/ffmpeg',{
+      method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},
+      body:JSON.stringify(montageJob(source)),
     }),
     async shortFile(job){
       const url=shortsOutput(job,origin);
@@ -129,7 +141,7 @@ export function ffmpegMontage(env=process.env){
 export function ffmpegShorts(env=process.env){
   const montage=ffmpegMontage(env);
   return {
-    lookup:montage.lookup,job:montage.job,shortFile:montage.shortFile,
+    lookup:montage.lookup,job:montage.job,shortFile:montage.shortFile,report:montage.report,submitAudit:montage.submitAudit,
     submit:(key,source,manifest)=>montage.submitShorts(key,source,manifest),
   };
 }

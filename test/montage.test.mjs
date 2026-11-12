@@ -13,7 +13,7 @@ import {videoAuditStatus} from '../src/analysis/video-status.mjs';
 import {reviewVideoAudit} from '../src/db/video-audit.mjs';
 import {registerPublication} from '../src/db/publications.mjs';
 import {montageStep} from '../src/media/montage-queue.mjs';
-import {initShortRender,listShortRenders} from '../src/db/shorts.mjs';
+import {createShortAuditMedia,initShortRender,listShortRenders} from '../src/db/shorts.mjs';
 
 const sha256='a'.repeat(64),ffmpegId='1a0b32d8-9cd7-4f01-bff4-68a767c1e77a';
 const audioReport='frame:0 pts:0 pts_time:0.1\nlavfi.r128.I=-21.4\nlavfi.r128.true_peak=0.100\n'
@@ -39,7 +39,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
   const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
   const db=native?await database():new PGlite();
   try{
-    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts']){
+    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit']){
       await db.exec(await readFile(new URL('../drizzle/'+name+'.sql',import.meta.url),'utf8'));
     }
     for(const [id,roles] of [['media-author',['author']],['media-review',['factchecker','editor']],['media-publisher',['publisher']],['other-author',['author']]]){
@@ -98,6 +98,31 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
     assert.equal((await initShortRender(db,'media-author',episode.id,shortInput)).id,short.id);
     assert.equal((await listShortRenders(db,'media-review',episode.id))[0].manifest.durationMs,41_000);
     await assert.rejects(initShortRender(db,'media-review',episode.id,shortInput),/FORBIDDEN/);
+    const renderToken='43827335-2e6c-42f4-a972-4269cb419d81';
+    await db.query(`UPDATE shorts_renders SET state='technical_check',run_token=$2,run_lease=now()+interval '3 minutes',
+      pathname=$3,expected_bytes=600,sha256=$4 WHERE id=$1`,[short.id,renderToken,`shorts/${episode.id}/${short.id}.mp4`,sha256]);
+    const shortReport={durationMs:41_000,width:1080,height:1920,videoCodec:'h264',audioCodec:'aac',
+      integratedLufs:-20,truePeakDbtp:-8,silence:[]};
+    const auditMediaId=await createShortAuditMedia(db,short.id,renderToken,shortReport);
+    const {rows:[auditMedia]}=await db.query('SELECT kind,snapshot,report FROM episode_media_revisions WHERE id=$1',[auditMediaId]);
+    assert.equal(auditMedia.kind,'short');
+    assert.equal(auditMedia.snapshot.short.title,'Short title');
+    assert.equal(auditMedia.report.width,1080);
+    assert.equal((await listMontage(db,'media-author',video.id)).length,1,'Short audit source stays out of regular montage list');
+    const shortAuditJob=await enqueueVideoAudit(db,'media-author',episode.id,auditMediaId,{},
+      {model:'gemini-test',inputRate:2,outputRate:10,monthlyMicros:1000000});
+    let shortProviderCalls=0;
+    const shortProvider=async(_model,input,{state})=>{
+      assert.equal(input.snapshot.short.title,'Short title');
+      assert.equal(input.durationMs,41_000);
+      if(!state){shortProviderCalls++;return {type:'waiting',delay:0,state:{interactionId:'short-audit'}};}
+      const report={audioAvailable:true,visualAvailable:true,summary:'Short test',
+        coverage:[{interval:0,audio:'Голос чіткий',visual:'Вертикальне відео'}],findings:[]};
+      return {type:'success',drafts:validateVideoAudit(report,input,[{modality:'video',tokens:20}]),usage:{input:30,output:10}};
+    };
+    for(let step=0;step<3;step++) await processAnalysisStep(db,shortAuditJob.id,1,shortProvider);
+    assert.equal((await videoAuditStatus(db,'media-review',episode.id,auditMediaId))[0].status,'succeeded');
+    assert.equal(shortProviderCalls,1);
     await db.query("UPDATE episode_media_revisions SET report=jsonb_set(report,'{durationMs}','2000'::jsonb) WHERE id=$1",[row.id]);
     const config={model:'gemini-test',inputRate:2,outputRate:10,monthlyMicros:1000000};
     const run=(identity,input={},limits=config)=>enqueueVideoAudit(db,identity,episode.id,row.id,input,limits);
@@ -144,8 +169,9 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
       disposition:'accepted',comment:'Не змінювати.'}),/REVIEW_CLOSED/);
     const {rows:[newRevision]}=await db.query(`INSERT INTO episode_media_revisions
       (id,episode_id,episode_version,uploaded_by,ordinal,pathname,expected_bytes,upload_until,expires_at,state,sha256,report,snapshot)
-      SELECT gen_random_uuid(),episode_id,episode_version,uploaded_by,ordinal+1,'montage/revised.mp4',expected_bytes,
-        upload_until,expires_at,'passed',sha256,report,snapshot FROM episode_media_revisions WHERE id=$1 RETURNING id`,[row.id]);
+      SELECT gen_random_uuid(),m.episode_id,m.episode_version,m.uploaded_by,
+        (SELECT MAX(ordinal)+1 FROM episode_media_revisions WHERE episode_id=m.episode_id),'montage/revised.mp4',m.expected_bytes,
+        m.upload_until,m.expires_at,'passed',m.sha256,m.report,m.snapshot FROM episode_media_revisions m WHERE m.id=$1 RETURNING id`,[row.id]);
     assert.equal((await listMontage(db,'media-review',video.id)).find(item=>item.id===newRevision.id).release_approved,false);
     await assert.rejects(registerPublication(db,'media-publisher',episode.id,{...publish,mediaRevisionId:newRevision.id,
       url:'https://youtu.be/QAstg8test1'}),/RELEASE_APPROVAL_REQUIRED/);

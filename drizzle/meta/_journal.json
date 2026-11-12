@@ -64,6 +64,13 @@
       "when": 1794441600008,
       "tag": "0008_shorts",
       "breakpoints": false
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794509900000,
+      "tag": "0009_shorts_audit",
+      "breakpoints": false
     }
   ]
 }

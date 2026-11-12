@@ -92,6 +92,6 @@ export async function listMontage(db,identity,videoId){
     LEFT JOIN LATERAL (SELECT j.id,j.attempt,a.reviewed_at FROM ai_jobs j JOIN prepublication_audits a
       ON a.job_id=j.id AND a.attempt=j.attempt WHERE j.media_revision_id=m.id AND j.mode='video' AND j.status='succeeded'
       ORDER BY a.completed_at DESC,j.created_at DESC,j.id DESC LIMIT 1) latest ON true
-    WHERE c.video_id=$1 ORDER BY m.ordinal DESC LIMIT 100`,[uuid(videoId),member.id]);
+    WHERE c.video_id=$1 AND m.kind='montage' ORDER BY m.ordinal DESC LIMIT 100`,[uuid(videoId),member.id]);
   return rows;
 }

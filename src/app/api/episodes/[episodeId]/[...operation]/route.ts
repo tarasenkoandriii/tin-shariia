@@ -44,7 +44,7 @@ export async function GET(_request:Request,{params}:Context){
       const identity=await publicationIdentity();
       const db=await database();
       const row=await getShortRender(db,identity,episodeId,operation[1]);
-      if(row.state==='queued'||row.state==='rendering') after(async()=>{
+      if(['queued','rendering','technical_check'].includes(row.state)) after(async()=>{
         try{await dispatchShort(db,row.id);}catch{console.error('SHORTS_RENDER_DISPATCH_FAILED');}
       });
       return publicationReply({id:row.id,state:row.state,manifest:row.manifest,sha256:row.sha256,

@@ -151,7 +151,8 @@ export default async function VideoPage({ params, searchParams }: {
           <ShortsPanel episode={episode}
             sources={montages.filter(item=>item.episode_id===episode.id).map(item=>({id:item.id,episode_version:item.episode_version,state:item.state}))}
             items={shortsByEpisode.get(episode.id)??[]}
-            canCreate={author&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)} />
+            canCreate={author&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)}
+            canReview={workflow.roles.includes('editor')} />
           <PublicationPanel episode={episode} publication={byEpisode.get(episode.id)} roles={workflow.roles}
             mediaRevisions={montages.filter(item=>item.episode_id===episode.id).map(item=>({
               id:item.id,ordinal:item.ordinal,version:item.episode_version,sha256:item.sha256,

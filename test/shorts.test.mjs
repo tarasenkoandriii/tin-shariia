@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {shortsOutput} from '../src/media/montage-ffmpeg.mjs';
+import {shortsOutput,validateShortTechnicalReport} from '../src/media/montage-ffmpeg.mjs';
 import {shortsRenderJob,validateShortsManifest} from '../src/media/shorts-manifest.mjs';
 
 const manifest={hook:'Короткий хук',title:'Перевірка',description:'Короткий опис',clips:[
@@ -37,6 +37,24 @@ test('accepts only the declared result file on the configured FFmpeg origin',()=
     new URL('https://ffmpeg.example.test')).pathname,`/api/files/${id}/short.mp4`);
   assert.throws(()=>shortsOutput({id,output_files:{'short.mp4':`https://evil.example/api/files/${id}/short.mp4`}},
     new URL('https://ffmpeg.example.test')),/SHORTS_RENDER_INVALID/);
+});
+
+test('Shorts technical release requires the exact complete 9:16 audio-video render',()=>{
+  const id='11111111-2222-4333-8444-555555555555';
+  const sha256='a'.repeat(64);
+  const text='frame:0 pts:0 pts_time:0.1\nlavfi.r128.I=-21.4\nlavfi.r128.true_peak=0.100\n'
+    +'frame:9 pts:9 pts_time:1\nframe:929 pts:929 pts_time:31\nlavfi.r128.I=-22.6\nlavfi.r128.true_peak=0.200\n';
+  const streams=[{type:'video',width:1080,height:1920,codec:'h264'},{type:'audio',codec:'aac',durationSec:31}];
+  const job={id,status:'succeeded',ffmpeg_version:'5.1',inputs_metadata:[{
+    key:'src',bytes:600,sha256,durationSec:31,format:'mov,mp4,m4a,3gp,3g2,mj2',streams,
+  }]};
+  const report=validateShortTechnicalReport(job,text,600,sha256);
+  assert.equal(report.width,1080);
+  assert.equal(report.height,1920);
+  assert.equal(report.durationMs,31000);
+  assert.throws(()=>validateShortTechnicalReport(job,text,600,'b'.repeat(64)),/SHORTS_TECH_CHECK_REJECTED/);
+  assert.throws(()=>validateShortTechnicalReport({...job,inputs_metadata:[{...job.inputs_metadata[0],
+    streams:[{...streams[0],width:1920,height:1080},streams[1]],}]},text,600,sha256),/SHORTS_TECH_CHECK_REJECTED/);
 });
 
 test('local FFmpeg smoke render produces a playable 1080x1920 MP4 with audio',async()=>{
