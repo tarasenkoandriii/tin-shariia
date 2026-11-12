@@ -57,6 +57,13 @@
       "when": 1794441600007,
       "tag": "0007_video_release_approval",
       "breakpoints": false
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794441600008,
+      "tag": "0008_shorts",
+      "breakpoints": false
     }
   ]
 }

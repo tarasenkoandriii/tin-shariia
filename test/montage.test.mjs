@@ -13,6 +13,7 @@ import {videoAuditStatus} from '../src/analysis/video-status.mjs';
 import {reviewVideoAudit} from '../src/db/video-audit.mjs';
 import {registerPublication} from '../src/db/publications.mjs';
 import {montageStep} from '../src/media/montage-queue.mjs';
+import {initShortRender,listShortRenders} from '../src/db/shorts.mjs';
 
 const sha256='a'.repeat(64),ffmpegId='1a0b32d8-9cd7-4f01-bff4-68a767c1e77a';
 const audioReport='frame:0 pts:0 pts_time:0.1\nlavfi.r128.I=-21.4\nlavfi.r128.true_peak=0.100\n'
@@ -38,7 +39,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
   const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
   const db=native?await database():new PGlite();
   try{
-    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval']){
+    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts']){
       await db.exec(await readFile(new URL('../drizzle/'+name+'.sql',import.meta.url),'utf8'));
     }
     for(const [id,roles] of [['media-author',['author']],['media-review',['factchecker','editor']],['media-publisher',['publisher']],['other-author',['author']]]){
@@ -89,6 +90,15 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
     assert.equal(stored.state,'passed');
     assert.equal(stored.report.width,1920);
     assert.equal((await listMontage(db,'media-author',video.id))[0].owned,true);
+    await db.query("UPDATE episode_media_revisions SET report=jsonb_set(report,'{durationMs}','60000'::jsonb) WHERE id=$1",[row.id]);
+    const shortInput={mediaId:row.id,manifest:{hook:'Hook',title:'Short title',description:'Short description',
+      clips:[{startMs:0,endMs:31_000},{startMs:40_000,endMs:50_000}]}};
+    const short=await initShortRender(db,'media-author',episode.id,shortInput);
+    assert.equal(short.state,'queued');
+    assert.equal((await initShortRender(db,'media-author',episode.id,shortInput)).id,short.id);
+    assert.equal((await listShortRenders(db,'media-review',episode.id))[0].manifest.durationMs,41_000);
+    await assert.rejects(initShortRender(db,'media-review',episode.id,shortInput),/FORBIDDEN/);
+    await db.query("UPDATE episode_media_revisions SET report=jsonb_set(report,'{durationMs}','2000'::jsonb) WHERE id=$1",[row.id]);
     const config={model:'gemini-test',inputRate:2,outputRate:10,monthlyMicros:1000000};
     const run=(identity,input={},limits=config)=>enqueueVideoAudit(db,identity,episode.id,row.id,input,limits);
     await assert.rejects(run('media-review'),/FORBIDDEN/);

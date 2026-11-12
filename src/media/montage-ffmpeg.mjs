@@ -1,4 +1,5 @@
 import {createAudioAuditJob} from './ffmpeg-audio-job.mjs';
+import {shortsRenderJob} from './shorts-manifest.mjs';
 
 const maxReport=4*1024*1024;
 export function montageJob(url){
@@ -46,6 +47,15 @@ export function montageReport(job,text,expectedBytes){
   }};
 }
 
+export function shortsOutput(job,origin){
+  if(!job?.id||!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(job.id)) throw Error('SHORTS_RENDER_INVALID');
+  let url;
+  try{url=new URL(job.output_files?.['short.mp4']);}catch{throw Error('SHORTS_RENDER_INVALID');}
+  if(url.origin!==origin.origin||url.pathname!==`/api/files/${job.id}/short.mp4`||url.search||url.hash)
+    throw Error('SHORTS_RENDER_INVALID');
+  return url;
+}
+
 export function ffmpegMontage(env=process.env){
   const origin=new URL(env.MONTAGE_FFMPEG_ORIGIN);
   if(origin.protocol!=='https:'||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash||!env.MONTAGE_FFMPEG_TOKEN) {
@@ -70,6 +80,30 @@ export function ffmpegMontage(env=process.env){
       method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},
       body:JSON.stringify(montageJob(source)),
     }),
+    submitShorts:(key,source,manifest)=>request('/api/ffmpeg',{
+      method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},
+      body:JSON.stringify(shortsRenderJob(source,manifest)),
+    }),
+    async shortFile(job){
+      const url=shortsOutput(job,origin);
+      const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(60000)});
+      if(!response.ok) throw Error('SHORTS_RENDER_UNAVAILABLE');
+      const length=Number(response.headers.get('content-length'));
+      if(Number.isFinite(length)&&length>128*1024*1024) throw Error('SHORTS_RENDER_INVALID');
+      const reader=response.body?.getReader();
+      if(!reader) throw Error('SHORTS_RENDER_INVALID');
+      const chunks=[];let size=0;
+      try{
+        for(;;){
+          const {value,done}=await reader.read();if(done)break;
+          size+=value.byteLength;
+          if(size>128*1024*1024){await reader.cancel();throw Error('SHORTS_RENDER_INVALID');}
+          chunks.push(value);
+        }
+      }finally{reader.releaseLock();}
+      if(size<16||(Number.isFinite(length)&&length!==size)) throw Error('SHORTS_RENDER_INVALID');
+      return Buffer.concat(chunks,size);
+    },
     async report(job){
       const url=new URL(job.output_files?.['audit.txt']);
       if(url.origin!==origin.origin||url.pathname!=='/api/files/'+job.id+'/audit.txt') throw Error('MONTAGE_REPORT_INVALID');
@@ -89,5 +123,13 @@ export function ffmpegMontage(env=process.env){
       }finally{reader.releaseLock();}
       return Buffer.concat(chunks,size).toString('utf8');
     },
+  };
+}
+
+export function ffmpegShorts(env=process.env){
+  const montage=ffmpegMontage(env);
+  return {
+    lookup:montage.lookup,job:montage.job,shortFile:montage.shortFile,
+    submit:(key,source,manifest)=>montage.submitShorts(key,source,manifest),
   };
 }

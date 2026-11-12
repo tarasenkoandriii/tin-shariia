@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { listMontage } from '../../../../db/montage.mjs';
 import { MontagePanel, type Montage } from '../../montage-panel';
+import { ShortsPanel } from '../../shorts-panel';
+import { listShortRenders } from '../../../../db/shorts.mjs';
 import { loadPublications } from '../../../../db/publications.mjs';
 import { PublicationPanel, type Publication } from '../../publication-panel';
 import { AnalysisPanel } from '../../analysis-panel';
@@ -76,6 +78,8 @@ export default async function VideoPage({ params, searchParams }: {
   const claims: Claim[] = workflow.claims;
   const episodes: Episode[] = workflow.episodes;
   const events: WorkflowEvent[] = workflow.events;
+  const shortsByEpisode=new Map(await Promise.all(episodes.map(async episode=>
+    [episode.id,await listShortRenders(db,id,episode.id)] as const)));
   const requestedTranscript = (await searchParams).transcript;
   const chosen = transcripts.find(t=>t.id===requestedTranscript);
   const segments: Segment[] = chosen ? await loadTranscript(db,id,videoId,chosen.id) : [];
@@ -144,6 +148,10 @@ export default async function VideoPage({ params, searchParams }: {
           <MontagePanel episode={episode} items={montages.filter(item=>item.episode_id===episode.id)}
             canUpload={author&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)}
             canReview={workflow.roles.includes('editor')} />
+          <ShortsPanel episode={episode}
+            sources={montages.filter(item=>item.episode_id===episode.id).map(item=>({id:item.id,episode_version:item.episode_version,state:item.state}))}
+            items={shortsByEpisode.get(episode.id)??[]}
+            canCreate={author&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)} />
           <PublicationPanel episode={episode} publication={byEpisode.get(episode.id)} roles={workflow.roles}
             mediaRevisions={montages.filter(item=>item.episode_id===episode.id).map(item=>({
               id:item.id,ordinal:item.ordinal,version:item.episode_version,sha256:item.sha256,
