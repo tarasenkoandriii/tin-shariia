@@ -123,7 +123,10 @@ function editorRequest(collection: string, item: Claim | Episode | undefined, da
   } : { ...data, action:'create' }, item ? 'PATCH' : 'POST') };
 }
 
-export function ClaimForm({ videoId, transcripts, claim }: { videoId: string; transcripts: Transcript[]; claim?: Claim }) {
+type DraftFields = { transcriptId:string; quote:string; question:string; startMs:number|null; endMs:number|null };
+export function ClaimForm({ videoId, transcripts, claim, draft }: {
+  videoId: string; transcripts: Transcript[]; claim?: Claim; draft?: DraftFields;
+}) {
   const request = useRequest();
   return <form onSubmit={event => {
     const form = submit(event);
@@ -135,13 +138,13 @@ export function ClaimForm({ videoId, transcripts, claim }: { videoId: string; tr
     });
     void request.send(path,init);
   }}>
-    <Fields labels={claimFields} values={claim?.content} required={['quote','question']} />
-    <label>Версія розшифрування <select name="transcriptId" defaultValue={claim?.transcript_id ?? ''}>
+    <Fields labels={claimFields} values={claim?.content ?? draft} required={['quote','question']} />
+    <label>Версія розшифрування <select name="transcriptId" defaultValue={claim?.transcript_id ?? draft?.transcriptId ?? ''}>
       <option value="">Ручна цитата</option>
       {transcripts.map(t=><option key={t.id} value={t.id}>{t.version} · {t.format.toUpperCase()}</option>)}
     </select></label>
-    <label>Початок, мс <input type="number" name="startMs" min={0} defaultValue={claim?.content.startMs ?? ''} /></label>
-    <label>Кінець, мс <input type="number" name="endMs" min={1} defaultValue={claim?.content.endMs ?? ''} /></label>
+    <label>Початок, мс <input type="number" name="startMs" min={0} defaultValue={claim?.content.startMs ?? draft?.startMs ?? ''} /></label>
+    <label>Кінець, мс <input type="number" name="endMs" min={1} defaultValue={claim?.content.endMs ?? draft?.endMs ?? ''} /></label>
     <label>Висновок <select name="verdict" defaultValue={claim?.content.verdict ?? ''}>
       <option value="">Оберіть висновок</option>
       {Object.entries(verdictLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AnalysisPanel } from '../../analysis-panel';
 import { notFound, redirect } from 'next/navigation';
 import { clerkId } from '../../../../access/session';
 import { database } from '../../../../db/runtime.mjs';
@@ -95,6 +96,7 @@ export default async function VideoPage({ params, searchParams }: {
       </li>)}</ol>}
       {segments.length===300 && <p>Показано перші 300 фрагментів.</p>}
     </section>
+    <AnalysisPanel videoId={videoId} transcripts={transcripts} canRun={author} />
     <section>
       <h2>Твердження</h2>
       {author && <details><summary>Нове твердження</summary><ClaimForm videoId={videoId} transcripts={transcripts} /></details>}

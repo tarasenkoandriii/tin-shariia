@@ -22,6 +22,13 @@
       "when": 1794441600002,
       "tag": "0002_editorial_workflow",
       "breakpoints": false
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794441600003,
+      "tag": "0003_analysis_queue",
+      "breakpoints": false
     }
   ]
 }

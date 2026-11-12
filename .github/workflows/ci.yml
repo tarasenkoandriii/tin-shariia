@@ -44,5 +44,5 @@ jobs:
         run: |
           docker exec ${{ job.services.postgres.id }} createdb -U postgres workflow_test
           npm run db:migrate
-          node --test test/editorial-workflow.test.mjs
+          node --test test/editorial-workflow.test.mjs test/analysis-queue.test.mjs
       - run: npm run build

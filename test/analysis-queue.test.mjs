@@ -1,0 +1,110 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+import { PGlite } from '@electric-sql/pglite';
+import { database } from '../src/db/runtime.mjs';
+import { registerVideo, importTranscript } from '../src/db/editorial-import.mjs';
+import { analysisStatus, dispatchAnalysis, enqueueAnalysis, processAnalysisStep, recoverAnalysis } from '../src/analysis/queue.mjs';
+import { geminiProvider } from '../src/analysis/gemini.mjs';
+import { mergeDrafts, splitTranscript, validateDrafts } from '../src/analysis/input.mjs';
+
+const config={model:'gemini-4-argon',inputRate:2,outputRate:10,monthlyMicros:1000000};
+const schemaFiles=['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue'];
+const quote='Міст відкрили в понеділок.';
+const proposal={kind:'fact',quote,paraphrase:false,segmentIds:[0],question:'Коли відкрили міст?'};
+
+test('chunks retain segment IDs, bound inputs and reject fabricated references',()=>{
+  const segments=Array.from({length:6},(_,position)=>({position,body:'a'.repeat(2500),start_ms:position*1000,end_ms:(position+1)*1000}));
+  const chunks=splitTranscript(segments);
+  assert.equal(chunks.length,3);
+  assert.equal(chunks[0].at(-1).id,chunks[1][0].id);
+  assert.throws(()=>splitTranscript([{...segments[0],body:'я'.repeat(6000)}]),/SEGMENT_TOO_LARGE/);
+  const input=[{id:0,text:quote,startMs:10,endMs:20}];
+  const drafts=validateDrafts({proposals:[proposal,{...proposal,segmentIds:[123]},{...proposal,quote:'Неправильна цитата'}]},input);
+  assert.equal(drafts.length,2);
+  assert.equal(drafts[0].verifiedQuote,true);
+  assert.equal(drafts[1].verifiedQuote,false);
+  assert.equal(drafts[0].startMs,10);
+  assert.equal(mergeDrafts([drafts[0],drafts[0]]).length,1);
+});
+
+test('Gemini adapter distinguishes retries, uncertain transport and metered output',async()=>{
+  const chunk=[{id:0,text:quote,startMs:null,endMs:null}];
+  const env={ANALYSIS_ENABLED:'true',GEMINI_API_KEY:'mock'};
+  const provider=fn=>geminiProvider({env,client:{models:{generateContent:fn}}})(config.model,chunk);
+  const actual=await provider(async request=>{
+    assert.equal(request.config.maxOutputTokens,2048);
+    assert.equal(request.model,'gemini-4-argon');
+    return {text:JSON.stringify({proposals:[proposal]}),usageMetadata:{promptTokenCount:50,candidatesTokenCount:12,thoughtsTokenCount:3}};
+  });
+  assert.deepEqual(actual.usage,{input:50,output:15});
+  assert.equal(actual.drafts[0].verifiedQuote,true);
+  const throttled=await provider(async()=>{throw Object.assign(Error(),{status:429,headers:new Headers({'Retry-After':'7'})});});
+  assert.deepEqual(throttled,{type:'transient',code:'PROVIDER_RATE_LIMIT',delay:7});
+  assert.equal((await provider(async()=>{throw Error('connection reset');})).type,'unknown');
+  assert.equal((await provider(async()=>({text:'{}'}))).code,'PROVIDER_USAGE_UNKNOWN');
+  const bad=await provider(async()=>({text:'garbage',usageMetadata:{promptTokenCount:10,candidatesTokenCount:2}}));
+  assert.deepEqual(bad,{type:'failed',usage:{input:10,output:2},code:'PROVIDER_RESPONSE_INVALID'});
+});
+
+test('queue fences duplicate dispatch, keeps uncertain reserves and retries with explicit consent',async()=>{
+  const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
+  const db=native?await database():new PGlite();
+  try {
+    if(!native) for(const file of schemaFiles) await db.exec(await readFile(new URL('../drizzle/'+file+'.sql',import.meta.url),'utf8'));
+    const {rows:[member]}=await db.query("INSERT INTO members (clerk_user_id,email) VALUES ('analyst','analysis@example.test') RETURNING id");
+    await db.query("INSERT INTO member_roles VALUES ($1,'author')",[member.id]);
+    const video=await registerVideo(db,'https://youtu.be/QAanalysis1');
+    const transcript=await importTranscript(db,{videoId:video.id,format:'txt',bytes:Buffer.from(quote)});
+    const second=await importTranscript(db,{videoId:video.id,format:'txt',bytes:Buffer.from('Інша версія.')});
+    const enqueue=(transcriptId=transcript.id,extra={},settings=config)=>enqueueAnalysis(db,'analyst',video.id,{transcriptId,...extra},settings);
+    await assert.rejects(enqueue(transcript.id,{}, {...config,monthlyMicros:1}),/BUDGET_EXHAUSTED/);
+    const [first,duplicate]=await Promise.all([enqueue(),enqueue()]);
+    assert.equal(first.id,duplicate.id);
+    assert.equal([first,duplicate].filter(job=>!job.deduplicated).length,1);
+    await assert.rejects(enqueue(second.id),/CONCURRENCY_LIMIT/);
+    let launches=0;
+    assert.deepEqual(await dispatchAnalysis(db,async()=>{launches++;throw Error('response lost after run start');}),{leased:1,started:0});
+    assert.deepEqual(await dispatchAnalysis(db,async()=>{throw Error('must not launch');}),{leased:0,started:0});
+    await db.query("UPDATE job_outbox SET lease_until=now()-interval '1 second' WHERE job_id=$1",[first.id]);
+    assert.deepEqual(await dispatchAnalysis(db,async()=>{launches++;return 'run-2';}),{leased:1,started:1});
+    assert.equal(launches,2);
+    let sends=0;
+    const throttle=async()=>{sends++;return {type:'transient',code:'PROVIDER_RATE_LIMIT',delay:7};};
+    assert.deepEqual(await processAnalysisStep(db,first.id,1,throttle),{delay:7});
+    assert.ok((await processAnalysisStep(db,first.id,1,throttle)).delay>0);
+    assert.equal(sends,1);
+    await db.query("UPDATE ai_chunks SET next_at=now()-interval '1 second' WHERE job_id=$1 AND attempt=1",[first.id]);
+    let entered;
+    const started=new Promise(resolve=>{entered=resolve;});
+    let release;
+    const pending=new Promise(resolve=>{release=resolve;});
+    const attempt=processAnalysisStep(db,first.id,1,async()=>{sends++;entered();return pending;});
+    await started;
+    assert.deepEqual(await processAnalysisStep(db,first.id,1,throttle),{done:true});
+    assert.equal(sends,2);
+    await db.query("UPDATE ai_attempts SET lease_until=now()-interval '1 second' WHERE job_id=$1",[first.id]);
+    await recoverAnalysis(db);
+    release({type:'success',usage:{input:1,output:1},drafts:[]});
+    await attempt;
+    let job=await analysisStatus(db,'analyst',{id:first.id});
+    assert.equal(job.status,'unknown');
+    assert.equal(job.budget_status,'unknown');
+    assert.equal(job.drafts.length,0);
+    await assert.rejects(enqueue(transcript.id,{retry:true,expectedAttempt:1}),/ACKNOWLEDGMENT_REQUIRED/);
+    await assert.rejects(enqueue(transcript.id,{retry:true,expectedAttempt:0,acknowledgeUnknown:true}),/ATTEMPT_CONFLICT/);
+    const retry=await enqueue(transcript.id,{retry:true,expectedAttempt:1,acknowledgeUnknown:true});
+    assert.equal(retry.attempt,2);
+    assert.equal(retry.id,first.id);
+    const provider=async(_model,chunk)=>({type:'success',usage:{input:50,output:15},drafts:validateDrafts({proposals:[proposal]},chunk)});
+    assert.deepEqual(await processAnalysisStep(db,first.id,2,provider),{delay:0});
+    assert.deepEqual(await processAnalysisStep(db,first.id,2,provider),{done:true});
+    assert.deepEqual(await processAnalysisStep(db,first.id,2,throttle),{done:true});
+    job=await analysisStatus(db,'analyst',{id:first.id});
+    assert.equal(job.status,'succeeded');
+    assert.equal(Number(job.spent_micros),250);
+    assert.equal(job.drafts.length,1);
+    const {rows}=await db.query('SELECT status FROM budget_reservations WHERE job_id=$1 ORDER BY attempt',[first.id]);
+    assert.deepEqual(rows.map(row=>row.status),['unknown','settled']);
+  } finally { if(!native) await db.close(); }
+});
