@@ -1,0 +1,13 @@
+{
+  "id": "f444a98f-a97a-4803-9029-0b0716b5e002",
+  "anonymous": 403,
+  "expiredStatus": 403,
+  "signed": 200,
+  "reportBytes": 7015,
+  "shortBytes": 24310,
+  "idempotent": true,
+  "lufs": "-22.825",
+  "peak": "0.129",
+  "silenceStart": "1",
+  "silenceEnd": "2.00002"
+}

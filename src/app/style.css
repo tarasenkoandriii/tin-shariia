@@ -1,0 +1,11 @@
+:root { color-scheme: dark; font: 16px/1.55 system-ui, sans-serif; background: #101418; color: #edf2f4; }
+main { max-width: 46rem; margin: 4rem auto; padding: 0 1.25rem 3rem; }
+h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; }
+a { color: #82dfcc; }
+form { display: grid; gap: .7rem; margin-block: 1rem; }
+fieldset { border: 1px solid #64717a; }
+fieldset label { display: inline-block; margin: .35rem .65rem .35rem 0; }
+input, button, output { font: inherit; padding: .5rem .7rem; }
+button { width: fit-content; cursor: pointer; }
+output { display: block; overflow-wrap: anywhere; background: #263539; }
+li { margin-block: .6rem; }

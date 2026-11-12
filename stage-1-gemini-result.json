@@ -1,0 +1,80 @@
+{
+  "original": {
+    "id": "v1_ChdKZjMwYXJpd0pxLWQyOG9QaWUzSHNBMBIXSmYzMGFyaXdKcS1kMjhvUGllM0hzQTA",
+    "status": "completed",
+    "steps": [
+      {
+        "content": [
+          {
+            "text": "- **Visual background:** Solid blue\n- **Spoken colors:** Red, blue, green",
+            "type": "text"
+          }
+        ],
+        "type": "model_output"
+      }
+    ],
+    "usage": {
+      "total_tokens": 277,
+      "total_input_tokens": 254,
+      "input_tokens_by_modality": [
+        {
+          "modality": "text",
+          "tokens": 54
+        },
+        {
+          "modality": "video",
+          "tokens": 200
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 23,
+      "output_tokens_by_modality": [
+        {
+          "modality": "text",
+          "tokens": 23
+        }
+      ],
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0
+    }
+  },
+  "revised": {
+    "id": "v1_ChdWUDMwYXNEU0M2U3V2ZElQeU95UHNRMBIXVlAzMGFzRFNDNlN1dmRJUHlPeVBzUTA",
+    "status": "completed",
+    "usage": {
+      "total_tokens": 278,
+      "total_input_tokens": 256,
+      "input_tokens_by_modality": [
+        {
+          "modality": "text",
+          "tokens": 54
+        },
+        {
+          "modality": "video",
+          "tokens": 202
+        }
+      ],
+      "total_cached_tokens": 0,
+      "total_output_tokens": 22,
+      "output_tokens_by_modality": [
+        {
+          "modality": "text",
+          "tokens": 22
+        }
+      ],
+      "total_tool_use_tokens": 0,
+      "total_thought_tokens": 0
+    },
+    "steps": [
+      {
+        "content": [
+          {
+            "text": "The visual background is blue, and the spoken colors are red, yellow, and green.",
+            "type": "text"
+          }
+        ],
+        "type": "model_output"
+      }
+    ]
+  }
+}
