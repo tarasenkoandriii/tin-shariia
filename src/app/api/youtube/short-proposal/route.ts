@@ -3,7 +3,7 @@ import { activeMember } from '../../../../access/membership.mjs';
 import { publicationError, publicationIdentity, publicationInput, publicationReply } from '../../../../access/publication-http';
 import { analysisConfig } from '../../../../analysis/config.mjs';
 import { monthlyAnalysisBudget } from '../../../../analysis/monthly-budget.mjs';
-import { suggestYouTubeShort, youtubeOutputLimit, youtubeProposalInput } from '../../../../analysis/shorts-proposal.mjs';
+import { suggestYouTubeShort, youtubeOutputLimit, youtubeProposalInput, youtubeWindowSeconds } from '../../../../analysis/shorts-proposal.mjs';
 import { database } from '../../../../db/runtime.mjs';
 import { settleShortsProposal } from '../../../../db/shorts.mjs';
 import { uuid } from '../../../../editorial/workflow-input.mjs';
@@ -31,8 +31,8 @@ export async function POST(request: Request) {
         if (existing.state === 'succeeded') return { id: existing.id, cached: true, result: existing.plan };
         throw Error(existing.state === 'running' ? 'SHORTS_PROPOSAL_PENDING' : 'SHORTS_PROPOSAL_UNKNOWN');
       }
-      // Reserve for a bounded 90-second video window and model output, including reasoning.
-      const reserve = 65_536 * config.inputRate + 2 * youtubeOutputLimit * config.outputRate;
+      // Reserve for a bounded video window and model output, including reasoning.
+      const reserve = Math.ceil(65_536 * youtubeWindowSeconds / 90) * config.inputRate + 2 * youtubeOutputLimit * config.outputRate;
       const budget = await monthlyAnalysisBudget(tx);
       if (Number(budget.used) + reserve > config.monthlyMicros) throw Error('BUDGET_EXHAUSTED');
       const { rows: [call] } = await tx.query(
@@ -58,6 +58,7 @@ export async function POST(request: Request) {
         const code = status === 400 ? 'YOUTUBE_ANALYSIS_REQUEST_REJECTED'
           : status === 401 || status === 403 ? 'YOUTUBE_ANALYSIS_ACCESS_DENIED'
           : status === 404 ? 'YOUTUBE_ANALYSIS_RESOURCE_UNAVAILABLE'
+          : status === 402 ? 'YOUTUBE_ANALYSIS_BILLING_REQUIRED'
           : status === 429 ? 'YOUTUBE_ANALYSIS_QUOTA'
           : name === 'TimeoutError' || name === 'AbortError' ? 'YOUTUBE_ANALYSIS_TIMEOUT'
           : 'SHORTS_PROPOSAL_UNKNOWN';

@@ -46,7 +46,7 @@ export function YouTubeShortProposal() {
 
   return <section className="workflow-card">
     <h2>Фрагмент YouTube для Shorts</h2>
-    <p>Gemini аналізує до 90 секунд публічного відео й пропонує фрагменти загальною тривалістю 30–60 секунд.</p>
+    <p>Gemini аналізує до 45 секунд публічного відео й пропонує фрагменти загальною тривалістю 30–45 секунд.</p>
     <form onSubmit={submit}>
       <label>Посилання YouTube <input name="url" type="url" required placeholder="https://www.youtube.com/watch?v=…" /></label>
       <label>Початок, секунди <input name="startSeconds" type="number" min="0" max="86400" step="1" defaultValue="0" required /></label>
