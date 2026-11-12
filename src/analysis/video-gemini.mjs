@@ -2,7 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { montageUrl } from '../media/montage-storage.mjs';
 import { validateVideoAudit, videoOutputLimit, videoPrompt, videoResponseFormat } from './video-input.mjs';
 
-const directLimit=95_000_000;
+const inlineLimit=10_000_000;
 const providerDeadline=15*60*1000;
 const requestOptions={maxRetries:0,timeout:25000};
 const statesWaiting=new Set(['in_progress','queued','pending','running']);
@@ -60,28 +60,29 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
     if(!row||row.state!=='passed'||row.sha256!==input.sha256||new Date(row.expires_at).getTime()<=Date.now()){
       return failed('MEDIA_NOT_READY');
     }
-    let uri;
+    let video;
     try{
       if(progress.fileName){
         const file=await ai.files.get({name:progress.fileName});
         if(file.state==='FAILED') return failed('VIDEO_FILE_REJECTED');
         if(file.state!=='ACTIVE') return wait(progress);
-        uri=file.uri;
-      }else if(input.expectedBytes>directLimit){
+        if(!file.uri) return failed('VIDEO_FILE_REJECTED');
+        video={uri:file.uri};
+      }else{
         const source=await fetch(await sign(row,'get',15),{redirect:'error',signal:AbortSignal.timeout(40000)});
         if(!source.ok||Number(source.headers.get('content-length'))!==input.expectedBytes) return failed('VIDEO_FILE_REJECTED');
-        const file=await ai.files.upload({file:await source.blob(),config:{mimeType:'video/mp4'}});
-        if(!file.name) return failed('VIDEO_FILE_REJECTED');
-        return wait({...progress,fileName:file.name});
-      }else{
-        uri=await sign(row,'get',15);
+        if(input.expectedBytes>inlineLimit){
+          const file=await ai.files.upload({file:await source.blob(),config:{mimeType:'video/mp4'}});
+          if(!file.name) return failed('VIDEO_FILE_REJECTED');
+          return wait({...progress,fileName:file.name});
+        }
+        video={data:Buffer.from(await source.arrayBuffer()).toString('base64')};
       }
     }catch{return failed('VIDEO_FILE_REJECTED');}
-    if(!uri) return failed('VIDEO_FILE_REJECTED');
     try{
       const interaction=await ai.interactions.create({
         model,background:true,store:true,
-        input:[{type:'video',uri,mime_type:'video/mp4',processing:{type:'static',fps:1}},
+        input:[{type:'video',...video,mime_type:'video/mp4',processing:{type:'static',fps:1}},
           {type:'text',text:videoPrompt(input)}],
         generation_config:{max_output_tokens:videoOutputLimit,thinking_level:'low'},
         response_format:videoResponseFormat,
@@ -90,7 +91,13 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
       return wait({...progress,interactionId:interaction.id});
     }catch(error){
       if(error?.status===429) return failed("PROVIDER_UNAVAILABLE");
-      if(error?.status>=400&&error.status<500&&error.status!==408) return failed('PROVIDER_REJECTED');
+      if(error?.status>=400&&error.status<500&&error.status!==408){
+        const detail=String(error.message??'').toLowerCase();
+        const reason=/schema|response_format/.test(detail)?'schema':/processing|fps/.test(detail)?'processing':
+          /background|store/.test(detail)?'background':/api.key|permission/.test(detail)?'access':'other';
+        console.warn('VIDEO_PROVIDER_REJECTED',error.status,reason);
+        return failed('PROVIDER_REJECTED');
+      }
       return unknown('PROVIDER_OUTCOME_UNKNOWN');
     }
   };
