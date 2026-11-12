@@ -7,6 +7,7 @@ import { database } from '../../db/runtime.mjs';
 import { CancelInviteForm, InviteForm, MemberForm } from './forms';
 import { loadWorkflow } from "../../db/editorial-workflow.mjs";
 import { VideoForm } from "./workflow-controls";
+import { EditorialVideosTable } from './editorial-videos-table';
 import { YouTubeConnectionPanel } from './youtube-connection-panel';
 import { getYouTubeConnection } from '../../db/youtube-uploads.mjs';
 
@@ -32,9 +33,11 @@ export default async function Editorial({searchParams}:{searchParams:Promise<{yo
     <p><Link href="/editorial/youtube-channel">Останні випуски каналу Шарія · YouTube</Link></p>
     <section><h2>Відео</h2>
       {member.roles.includes("author") && <VideoForm />}
-      {videos.length ? <ul>{videos.map((video: { id: string; youtube_id: string }) => <li key={video.id}>
-        <Link href={"/editorial/videos/"+video.id}>{video.youtube_id}</Link>
-      </li>)}</ul> : <p>Відео ще немає.</p>}
+      {videos.length ? <EditorialVideosTable videos={videos.map((video: {
+        id: string; youtube_id: string; created_at: Date | string;
+      }) => ({
+        id: video.id, youtubeId: video.youtube_id, createdAt: new Date(video.created_at).toISOString(),
+      }))} /> : <p>Відео ще немає.</p>}
     </section>
     {access && <>
       <h2>Запросити учасника</h2>

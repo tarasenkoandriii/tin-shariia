@@ -32,3 +32,25 @@ summary { cursor: pointer; margin-block: .5rem; }
 .channel-video-stats { color: #b5c2c9; margin: .35rem 0 .8rem; }
 .channel-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; margin-block: 1.5rem; }
 @media (max-width: 38rem) { .channel-video-card { grid-template-columns: 1fr; } }
+
+.editorial-video-scroll { overflow-x: auto; }
+.editorial-video-table { width: 100%; border-collapse: collapse; text-align: left; }
+.editorial-video-table th, .editorial-video-table td {
+  padding: .6rem;
+  border-bottom: 1px solid currentColor;
+  border-bottom-color: color-mix(in srgb, currentColor 20%, transparent);
+}
+.editorial-video-table th { white-space: nowrap; }
+.editorial-video-table th button { font: inherit; cursor: pointer; }
+.editorial-video-table time { white-space: nowrap; }
+.editorial-video-preview {
+  display: grid;
+  place-items: center;
+  width: 128px;
+  height: 72px;
+  border-radius: .4rem;
+  overflow: hidden;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: .75rem;
+}
+.editorial-video-preview img { width: 100%; height: 100%; object-fit: cover; }
