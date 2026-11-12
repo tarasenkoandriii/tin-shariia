@@ -82,7 +82,7 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
     try{
       const interaction=await ai.interactions.create({
         model,background:true,store:true,
-        input:[{type:'video',...video,mime_type:'video/mp4',processing:{type:'static',fps:1}},
+        input:[{type:'video',...video,mime_type:'video/mp4'},
           {type:'text',text:videoPrompt(input)}],
         generation_config:{max_output_tokens:videoOutputLimit,thinking_level:'low'},
         response_format:videoResponseFormat,
