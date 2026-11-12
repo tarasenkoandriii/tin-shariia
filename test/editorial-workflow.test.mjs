@@ -10,7 +10,7 @@ import { editorialMutation } from '../src/http/editorial-workflow.mjs';
 const origin='https://editorial.example.test';
 
 test('editorial HTTP workflow enforces revisions, independent approvals and evidence snapshots', async () => {
-  const native=process.env.RUN_POSTGRES_TESTS==='1';
+  const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
   const db=native ? await database() : new PGlite();
   try {
     if (!native) for (const filename of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow']) {

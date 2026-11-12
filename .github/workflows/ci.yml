@@ -36,4 +36,13 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - name: Verify editorial workflow on a separate PostgreSQL database
+        env:
+          DATABASE_URL: postgres://postgres:test@localhost:5432/workflow_test
+          DATABASE_MIGRATION_URL: postgres://postgres:test@localhost:5432/workflow_test
+          RUN_EDITORIAL_POSTGRES_TESTS: '1'
+        run: |
+          docker exec ${{ job.services.postgres.id }} createdb -U postgres workflow_test
+          npm run db:migrate
+          node --test test/editorial-workflow.test.mjs
       - run: npm run build
