@@ -62,3 +62,9 @@ OAuth and resumable Shorts-upload support is implemented locally but is not enab
 `https://tin-shariia.viral4creators.app/api/youtube/oauth/callback`
 
 Set these Vercel Production secrets in project `tin-shariia`: `GOOGLE_YOUTUBE_CLIENT_ID`, `GOOGLE_YOUTUBE_CLIENT_SECRET`, and a separately generated 32-byte base64url `YOUTUBE_TOKEN_ENCRYPTION_KEY`. Do not reuse the public Data API key as an encryption key. The app requests only `youtube.upload` and `youtube.readonly`; refresh tokens and resumable session URLs are encrypted at rest. Uploads require a publisher role, an approved exact Shorts media revision, an explicit visibility selection, and a confirmation bound to the file SHA-256. Upload state is reconciled with YouTube before it can be marked complete. Production channel consent and a private test upload remain required before Stage 13 can be accepted.
+
+### Soniox: редакційне розпізнавання
+
+Увімкніть серверні `SONIOX_ENABLED=true` та `SONIOX_API_KEY` після застосування міграції `0012_soniox_requests`. Використовуйте окремий ключ проєкту. Маршрут `POST /api/editorial/soniox?language=uk` доступний адміністраторам, авторам і редакторам з активною сесією редакції та з того самого origin.
+
+Передавайте тіло `audio/wav` (PCM 16-bit, mono, 16 kHz, до 60 секунд) і UUID у заголовку `Idempotency-Key`. WAV можна підготувати командою `ffmpeg -i input.mp4 -t 60 -map 0:a:0 -ac 1 -ar 16000 -c:a pcm_s16le -fflags +bitexact output.wav`. У відповіді `data.text` та `data.tokens` з `startMs` і `endMs`. Для російського оригіналу використовуйте `language=ru`. Повтор із тим самим UUID повертає 409. Квота — 3 спроби на учасника і 10 на проєкт за добу UTC. Аудіо і текст не зберігаються в базі. Видалення файлу й транскрипції запитується у Soniox після завершення або помилки.

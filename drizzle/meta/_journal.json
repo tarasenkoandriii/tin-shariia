@@ -85,6 +85,13 @@
       "when": 1794528000000,
       "tag": "0011_youtube_short_proposals",
       "breakpoints": false
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794530000000,
+      "tag": "0012_soniox_requests",
+      "breakpoints": false
     }
   ]
 }
