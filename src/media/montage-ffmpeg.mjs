@@ -55,12 +55,18 @@ export function validateShortTechnicalReport(job,text,expectedBytes,expectedSha2
   return report;
 }
 
+// Diagnostic detail travels on the error (never URLs or tokens) so the queue can log which check failed.
+const invalid=detail=>Object.assign(Error('SHORTS_RENDER_INVALID'),{detail});
+
 export function shortsOutput(job,origin){
-  if(!job?.id||!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(job.id)) throw Error('SHORTS_RENDER_INVALID');
+  if(!job?.id||!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(job.id))
+    throw invalid({check:'job_id_format',idLength:typeof job?.id==='string'?job.id.length:null});
   let url;
-  try{url=new URL(job.output_files?.['short.mp4']);}catch{throw Error('SHORTS_RENDER_INVALID');}
-  if(url.origin!==origin.origin||url.pathname!==`/api/files/${job.id}/short.mp4`||url.search||url.hash)
-    throw Error('SHORTS_RENDER_INVALID');
+  try{url=new URL(job.output_files?.['short.mp4']);}
+  catch{throw invalid({check:'output_url',outputKeys:Object.keys(job?.output_files??{}).slice(0,8)});}
+  if(url.origin!==origin.origin) throw invalid({check:'output_origin',sameHost:url.hostname===origin.hostname,protocol:url.protocol});
+  if(url.pathname!==`/api/files/${job.id}/short.mp4`) throw invalid({check:'output_path',endsWithShort:url.pathname.endsWith('/short.mp4')});
+  if(url.search||url.hash) throw invalid({check:'output_query'});
   return url;
 }
 
@@ -100,21 +106,23 @@ export function ffmpegMontage(env=process.env){
       const url=shortsOutput(job,origin);
       const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(60000)});
       if(!response.ok) throw Error('SHORTS_RENDER_UNAVAILABLE');
-      const contentLength=response.headers.get('content-length');
-      const length=contentLength===null?null:Number(contentLength);
-      if(length!==null&&Number.isFinite(length)&&length>128*1024*1024) throw Error('SHORTS_RENDER_INVALID');
+      const declared=response.headers.get('content-length');
+      const length=declared===null||declared.trim()===''?Number.NaN:Number(declared);
+      if(Number.isFinite(length)&&length>128*1024*1024) throw invalid({check:'content_length_limit',length});
       const reader=response.body?.getReader();
-      if(!reader) throw Error('SHORTS_RENDER_INVALID');
+      if(!reader) throw invalid({check:'no_body'});
       const chunks=[];let size=0;
       try{
         for(;;){
           const {value,done}=await reader.read();if(done)break;
           size+=value.byteLength;
-          if(size>128*1024*1024){await reader.cancel();throw Error('SHORTS_RENDER_INVALID');}
+          if(size>128*1024*1024){await reader.cancel();throw invalid({check:'size_limit',size});}
           chunks.push(value);
         }
       }finally{reader.releaseLock();}
-      if(size<16||(length!==null&&Number.isFinite(length)&&length!==size)) throw Error('SHORTS_RENDER_INVALID');
+      if(size<16||(Number.isFinite(length)&&length!==size))
+        throw invalid({check:'size_mismatch',size,length:Number.isFinite(length)?length:null,
+          encoding:response.headers.get('content-encoding')});
       return Buffer.concat(chunks,size);
     },
     async report(job){

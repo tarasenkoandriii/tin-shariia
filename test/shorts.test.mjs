@@ -5,7 +5,7 @@ import {mkdtemp,rm,stat,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import sharp from 'sharp';
-import {shortsOutput,validateShortTechnicalReport} from '../src/media/montage-ffmpeg.mjs';
+import {ffmpegMontage,shortsOutput,validateShortTechnicalReport} from '../src/media/montage-ffmpeg.mjs';
 import {shortsRenderJob,validateShortsManifest} from '../src/media/shorts-manifest.mjs';
 import {renderShortStamp} from '../src/media/shorts-stamp.mjs';
 
@@ -79,6 +79,18 @@ test('accepts only the declared result file on the configured FFmpeg origin',()=
     new URL('https://ffmpeg.example.test')).pathname,`/api/files/${id}/short.mp4`);
   assert.throws(()=>shortsOutput({id,output_files:{'short.mp4':`https://evil.example/api/files/${id}/short.mp4`}},
     new URL('https://ffmpeg.example.test')),/SHORTS_RENDER_INVALID/);
+  // Failures carry a URL-free diagnostic so production logs say which check rejected the job.
+  const origin=new URL('https://ffmpeg.example.test');
+  const detailOf=job=>{try{shortsOutput(job,origin);}catch(error){return error.detail;}};
+  assert.deepEqual(detailOf({id:'job_123',output_files:{}}),{check:'job_id_format',idLength:7});
+  const uuid='3f2b7c1e-8a4d-4e6f-9b2a-1c3d5e7f9a0b';
+  assert.deepEqual(detailOf({id:uuid,output_files:{'output.mp4':'https://ffmpeg.example.test/x'}}),{check:'output_url',outputKeys:['output.mp4']});
+  assert.deepEqual(detailOf({id:uuid,output_files:{'short.mp4':'https://cdn.example.test/api/files/'+uuid+'/short.mp4'}}),
+    {check:'output_origin',sameHost:false,protocol:'https:'});
+  assert.deepEqual(detailOf({id:uuid,output_files:{'short.mp4':'https://ffmpeg.example.test/files/'+uuid+'/short.mp4'}}),
+    {check:'output_path',endsWithShort:true});
+  assert.equal(String(shortsOutput({id:uuid,output_files:{'short.mp4':'https://ffmpeg.example.test/api/files/'+uuid+'/short.mp4'}},origin)),
+    'https://ffmpeg.example.test/api/files/'+uuid+'/short.mp4');
 });
 
 test('Shorts technical release requires the exact complete 9:16 audio-video render',()=>{
@@ -129,4 +141,22 @@ test('local FFmpeg pipeline render produces a playable 1080x1920 MP4 with audio 
     assert.ok(metadata.streams.some(stream=>stream.codec_type==='video'&&stream.width===1080&&stream.height===1920));
     assert.ok(metadata.streams.some(stream=>stream.codec_type==='audio'));
   }finally{await rm(directory,{recursive:true,force:true});}
+});
+
+test('Shorts download accepts a response without Content-Length (chunked transfer)',async()=>{
+  const id='11111111-2222-4333-8444-555555555555';
+  const env={MONTAGE_FFMPEG_ORIGIN:'https://ffmpeg.example.test/',MONTAGE_FFMPEG_TOKEN:'token'};
+  const job={id,output_files:{'short.mp4':`https://ffmpeg.example.test/api/files/${id}/short.mp4`}};
+  const body=Buffer.concat([Buffer.from([0,0,0,24]),Buffer.from('ftypisom'),Buffer.alloc(64,1)]);
+  const original=globalThis.fetch;
+  try{
+    // A streamed body: Response sets no Content-Length header for a ReadableStream.
+    globalThis.fetch=async()=>new Response(new ReadableStream({start(c){c.enqueue(body.subarray(0,40));c.enqueue(body.subarray(40));c.close();}}),{status:200});
+    const bytes=await ffmpegMontage(env).shortFile(job);
+    assert.equal(bytes.length,body.length);
+    assert.equal(bytes.toString('ascii',4,8),'ftyp');
+    // A declared length that disagrees with the bytes received is still rejected.
+    globalThis.fetch=async()=>new Response(body,{status:200,headers:{'content-length':String(body.length+5)}});
+    await assert.rejects(ffmpegMontage(env).shortFile(job),error=>error.detail?.check==='size_mismatch'&&error.detail.length===body.length+5);
+  }finally{globalThis.fetch=original;}
 });

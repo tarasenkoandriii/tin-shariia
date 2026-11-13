@@ -121,6 +121,7 @@ export async function shortsStep(db,id,token,{client=ffmpegShorts(),sign=montage
     return complete('ready',null,{technicalReport:report,auditMediaRevisionId});
   }catch(error){
     const code=String(error?.message??'');
+    if(code==='SHORTS_RENDER_INVALID') console.error('SHORTS_STEP_FAILED',{id,code,detail:error?.detail??null});
     if(['MONTAGE_DISABLED','MONTAGE_FFMPEG_REJECTED','SHORTS_RENDER_INVALID','SHORTS_INVALID_INPUT',
       'SHORTS_INVALID_CLIP','SHORTS_DURATION_INVALID','SHORTS_INVALID_SOURCE','SHORTS_INVALID_STAMP','SHORTS_INVALID_SUBTITLES','SHORTS_OUTPUT_INVALID',
       'MONTAGE_INVALID_MEDIA','MONTAGE_REPORT_INVALID','MONTAGE_AUDIO_INCOMPLETE','MONTAGE_AUDIO_SILENT',
