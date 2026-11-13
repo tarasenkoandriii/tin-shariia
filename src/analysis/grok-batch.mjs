@@ -10,8 +10,14 @@ export async function submitGrokBatch(name,items){
   try{created=await fetch(`${API}/batches`,{method:'POST',headers:headers(),body:JSON.stringify({name}),cache:'no-store'});}
   catch{return {error:'GROK_BATCH_CREATE_OUTCOME_UNKNOWN',unknown:true};}
   const batch=await created.json().catch(()=>null);
-  const id=batch?.id??batch?.batch_id;
-  if(!created.ok||typeof id!=='string')return {error:'GROK_BATCH_CREATE_FAILED'};
+  const id=batch?.batch_id??batch?.id;
+  if(!created.ok||typeof id!=='string'||!id.trim()){
+    const rawCode=batch?.error?.code??batch?.code;
+    const providerCode=typeof rawCode==='number'||(typeof rawCode==='string'&&/^[a-z0-9_-]{1,64}$/i.test(rawCode))
+      ?rawCode:null;
+    console.warn('GROK_BATCH_CREATE_FAILED',{status:created.status,providerCode,missingBatchId:created.ok});
+    return {error:'GROK_BATCH_CREATE_FAILED'};
+  }
   let response;
   try{response=await fetch(`${API}/batches/${encodeURIComponent(id)}/requests`,{method:'POST',headers:headers(),
     body:JSON.stringify({batch_requests:items.map(item=>({batch_request_id:item.id,batch_request:{chat_get_completion:{
