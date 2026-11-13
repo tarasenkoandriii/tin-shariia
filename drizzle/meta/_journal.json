@@ -148,6 +148,13 @@
       "when": 1794556000000,
       "tag": "0020_youtube_comment_targets",
       "breakpoints": false
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794557000000,
+      "tag": "0021_video_editing_quality",
+      "breakpoints": false
     }
   ]
 }

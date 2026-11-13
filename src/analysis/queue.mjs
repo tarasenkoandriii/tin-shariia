@@ -69,7 +69,7 @@ export function enqueueVideoAudit(db,identity,episodeId,mediaId,input,config){
         ||!media.report?.audioCodec||new Date(media.expires_at).getTime()<=Date.now()) throw Error('MEDIA_NOT_READY');
     if(media.publication||media.episode_status!=='approved'||media.claim_status!=='approved'
         ||media.episode_version!==media.current_version||media.snapshot.claimVersion!==media.claim_version) throw Error('MEDIA_STALE');
-    const chunk={mediaId:media.id,durationMs,snapshot:media.snapshot,expectedBytes:media.expected_bytes,sha256:media.sha256};
+    const chunk={scoreEditing:true,mediaId:media.id,durationMs,snapshot:media.snapshot,expectedBytes:media.expected_bytes,sha256:media.sha256};
     return {
       videoId:media.video_id,transcriptId:null,mediaId:media.id,mode:'video',hash:media.sha256,prompt:videoPromptVersion,
       work:()=>({chunks:[chunk],reserve:(Math.ceil(durationMs/1000)*320+Buffer.byteLength(videoPrompt(chunk))+2048)*config.inputRate
@@ -210,7 +210,10 @@ export async function processAnalysisStep(db,id,attempt,provider){
       const {rows}=await tx.query('SELECT result FROM ai_chunks WHERE job_id=$1 AND attempt=$2 ORDER BY position',[id,attempt]);
       if(job.mode==='video'){
         const report=rows[0].result;
-        await tx.query(`INSERT INTO prepublication_audits (job_id,attempt,media_revision_id,coverage,summary)
+        if(report.editingQuality) await tx.query(`INSERT INTO prepublication_audits (job_id,attempt,media_revision_id,coverage,summary,editing_score,editing_rationale)
+          VALUES ($1,$2,$3,$4::text::jsonb,$5,$6,$7)`,[id,attempt,job.media_revision_id,json(report.coverage),report.summary,
+          report.editingQuality?.score??null,report.editingQuality.rationale]);
+        else await tx.query(`INSERT INTO prepublication_audits (job_id,attempt,media_revision_id,coverage,summary)
           VALUES ($1,$2,$3,$4::text::jsonb,$5)`,[id,attempt,job.media_revision_id,json(report.coverage),report.summary]);
         for(const [position,finding] of report.findings.entries()){
           await tx.query('INSERT INTO audit_findings (job_id,attempt,position,finding) VALUES ($1,$2,$3,$4::text::jsonb)',

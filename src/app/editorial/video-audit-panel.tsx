@@ -7,7 +7,7 @@ type Finding={
   sourceIndex:number|null; observation:string; fix:string;
 };
 type Report={
-  attempt:number; summary:string; completedAt:string; reviewedAt:string|null; reviewedByMe:boolean;
+  attempt:number; summary:string; editingScore:number|null; editingRationale:string|null; completedAt:string; reviewedAt:string|null; reviewedByMe:boolean;
   coverage:{interval:number;startMs:number;endMs:number;audio:string;visual:string}[];
   findings:{finding:Finding;position:number;review:{disposition:string;comment:string}|null}[];
 };
@@ -114,6 +114,7 @@ export function VideoAuditPanel({endpoint,canRun,canReview,short=false}:{endpoin
       {job.reports.map(report=><details key={report.attempt} open={report.attempt===job.attempt}>
         <summary>Звіт · спроба {report.attempt}</summary>
         <p>{report.summary}</p>
+        {report.editingScore != null&&<div><strong>Якість монтажу · {report.editingScore}/100</strong><p>{report.editingRationale}</p></div>}
         <p>Gemini перевірив звук і відеоряд на всій шкалі. Кадри відеоряду відібрані з частотою 1 кадр/с.</p>
         <ul>{report.coverage.map(row=><li key={row.interval}>
           <strong>{seconds(row.startMs)} – {seconds(row.endMs)}</strong>

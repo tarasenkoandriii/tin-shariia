@@ -8,7 +8,7 @@ export async function videoAuditStatus(db,identity,episodeId,mediaId){
   if(!media) throw Error('NOT_FOUND');
   const {rows}=await db.query(`SELECT j.id,j.attempt,j.status,j.error_code,j.model,j.requested_by=$2 AS owned,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('attempt',a.attempt,'summary',a.summary,'coverage',a.coverage,
-      'completedAt',a.completed_at,'reviewedAt',a.reviewed_at,'reviewedByMe',(a.reviewed_by=$2),'findings',COALESCE((SELECT jsonb_agg(jsonb_build_object('finding',f.finding,'position',f.position,'review',CASE WHEN r.job_id IS NULL THEN NULL ELSE jsonb_build_object('disposition',r.disposition,'comment',r.comment) END) ORDER BY f.position)
+      'editingScore',(to_jsonb(a)->>'editing_score')::integer,'editingRationale',to_jsonb(a)->>'editing_rationale','completedAt',a.completed_at,'reviewedAt',a.reviewed_at,'reviewedByMe',(a.reviewed_by=$2),'findings',COALESCE((SELECT jsonb_agg(jsonb_build_object('finding',f.finding,'position',f.position,'review',CASE WHEN r.job_id IS NULL THEN NULL ELSE jsonb_build_object('disposition',r.disposition,'comment',r.comment) END) ORDER BY f.position)
       FROM audit_findings f LEFT JOIN audit_finding_reviews r USING(job_id,attempt,position) WHERE f.job_id=a.job_id AND f.attempt=a.attempt),'[]'::jsonb)) ORDER BY a.attempt DESC)
       FROM prepublication_audits a WHERE a.job_id=j.id),'[]'::jsonb) AS reports
     FROM ai_jobs j WHERE j.media_revision_id=$1 ORDER BY j.created_at DESC LIMIT 10`,[media.id,member.id]);
