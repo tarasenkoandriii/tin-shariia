@@ -4,6 +4,7 @@ import { activeMember } from '../access/membership.mjs';
 import { videoOutputLimit, videoPrompt, videoPromptVersion } from './video-input.mjs';
 import { uuid } from '../editorial/workflow-input.mjs';
 import { makePrompt, mergeDrafts, outputLimit, promptVersion, splitTranscript } from './input.mjs';
+import { splitYouTubeVideo, youtubeDurationSec, youtubePromptVersion, youtubeReserve } from './youtube-full.mjs';
 
 const attemptsLimit=3;
 const transientLimit=2;
@@ -29,6 +30,27 @@ export function enqueueAnalysis(db,identity,videoId,input,config){
         const reserve=chunks.reduce((sum,chunk)=>sum+(Buffer.byteLength(makePrompt(chunk))+1024)*config.inputRate
           +outputLimit*config.outputRate,0);
         return {chunks,reserve};
+      },
+    };
+  });
+}
+
+// Whole public YouTube video: Gemini watches it window by window. Duration comes from the YouTube Data API,
+// or from the author when the API is unavailable.
+export function enqueueYouTubeAnalysis(db,identity,videoId,input,config,{duration=youtubeDurationSec}={}){
+  videoId=uuid(videoId);
+  const manual=input.durationSec;
+  if(manual!==undefined&&(!Number.isSafeInteger(manual)||manual<10||manual>86400)) throw Error('INVALID_INPUT');
+  return enqueue(db,identity,input,config,async tx=>{
+    const {rows:[video]}=await tx.query('SELECT youtube_id FROM videos WHERE id=$1',[videoId]);
+    if(!video) throw Error('NOT_FOUND');
+    const durationSec=(await duration(video.youtube_id))??manual??null;
+    if(!durationSec) throw Error('YOUTUBE_DURATION_REQUIRED');
+    return {
+      videoId,transcriptId:null,mediaId:null,mode:'youtube',hash:video.youtube_id+':'+durationSec,prompt:youtubePromptVersion,
+      work(){
+        const chunks=splitYouTubeVideo(video.youtube_id,durationSec);
+        return {chunks,reserve:youtubeReserve(chunks,config)};
       },
     };
   });
@@ -263,14 +285,16 @@ export async function analysisStatus(db,identity,selection){
   const member=await activeMember(db,identity);
   if(!member) throw Error('FORBIDDEN');
   const where=id?'j.id=$1':'j.video_id=$1';
-  const {rows}=await db.query(`SELECT j.id,j.video_id,j.transcript_id,j.status,j.attempt,j.model,j.error_code,
+  const {rows}=await db.query(`SELECT j.id,j.video_id,j.transcript_id,j.mode,j.status,j.attempt,j.model,j.error_code,
     j.requested_by=$2 AS owned,j.created_at,j.updated_at,r.reserved_micros,r.spent_micros,r.status AS budget_status,
     (SELECT count(*)::integer FROM ai_chunks c WHERE c.job_id=j.id AND c.attempt=j.attempt AND c.status='complete') AS completed_chunks,
-    (SELECT count(*)::integer FROM ai_chunks c WHERE c.job_id=j.id AND c.attempt=j.attempt) AS total_chunks
+    (SELECT count(*)::integer FROM ai_chunks c WHERE c.job_id=j.id AND c.attempt=j.attempt) AS total_chunks,
+    (SELECT (c.input->>'durationSec')::integer FROM ai_chunks c WHERE c.job_id=j.id AND c.attempt=j.attempt AND j.mode='youtube'
+      ORDER BY c.position LIMIT 1) AS duration_sec
     FROM ai_jobs j JOIN budget_reservations r ON r.job_id=j.id AND r.attempt=j.attempt
-    WHERE j.mode='transcript' AND ${where} ORDER BY j.created_at DESC LIMIT 20`,[uuid(id??videoId),member.id]);
+    WHERE j.mode IN ('transcript','youtube') AND ${where} ORDER BY j.created_at DESC LIMIT 20`,[uuid(id??videoId),member.id]);
   if(!id) return rows;
   if(!rows.length) throw Error('NOT_FOUND');
-  const {rows:drafts}=await db.query('SELECT position,draft FROM ai_claim_drafts WHERE job_id=$1 ORDER BY position',[id]);
-  return {...rows[0],drafts:drafts.map(row=>row.draft)};
+  const {rows:drafts}=await db.query('SELECT position,draft,claim_id FROM ai_claim_drafts WHERE job_id=$1 ORDER BY position',[id]);
+  return {...rows[0],drafts:drafts.map(row=>({...row.draft,position:row.position,claimId:row.claim_id}))};
 }

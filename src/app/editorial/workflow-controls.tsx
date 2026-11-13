@@ -129,7 +129,7 @@ function editorRequest(collection: string, item: Claim | Episode | undefined, da
   } : { ...data, action:'create' }, item ? 'PATCH' : 'POST') };
 }
 
-type DraftFields = { transcriptId:string; quote:string; question:string; startMs:number|null; endMs:number|null };
+type DraftFields = { transcriptId?:string; quote:string; question:string; startMs:number|null; endMs:number|null };
 export function ClaimForm({ videoId, transcripts, claim, draft }: {
   videoId: string; transcripts: Transcript[]; claim?: Claim; draft?: DraftFields;
 }) {

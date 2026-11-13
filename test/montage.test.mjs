@@ -39,7 +39,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
   const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
   const db=native?await database():new PGlite();
   try{
-    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit','0010_youtube_uploads','0011_youtube_short_proposals','0012_soniox_requests','0013_ai_disclosures','0014_publication_insights','0015_youtube_comment_campaign','0016_montage_plan_library','0017_tiktok_manual_publications']){
+    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit','0010_youtube_uploads','0011_youtube_short_proposals','0012_soniox_requests','0013_ai_disclosures','0014_publication_insights','0015_youtube_comment_campaign','0016_montage_plan_library','0017_tiktok_manual_publications','0018_grok_direct_mode','0019_youtube_full_analysis']){
       await db.exec(await readFile(new URL('../drizzle/'+name+'.sql',import.meta.url),'utf8'));
     }
     for(const [id,roles] of [['media-author',['author']],['media-review',['factchecker','editor']],['media-publisher',['publisher']],['other-author',['author']]]){

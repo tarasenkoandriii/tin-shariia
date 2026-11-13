@@ -7,9 +7,10 @@ import type { Transcript } from './workflow-types';
 type Draft = {
   kind: string; quote: string; question: string; verifiedQuote: boolean; paraphrase: boolean;
   segmentIds: number[]; startMs: number | null; endMs: number | null;
+  context?: string; position?: number; claimId?: string | null;
 };
 type Job = {
-  id: string; status: string; attempt: number; transcript_id: string; owned: boolean;
+  id: string; status: string; attempt: number; transcript_id: string | null; mode?: string; duration_sec?: number | null; owned: boolean;
   error_code: string | null; completed_chunks: number; total_chunks: number;
   budget_status: string; reserved_micros: string; spent_micros: string; drafts?: Draft[];
 };
@@ -32,6 +33,9 @@ const errors: Record<string,string> = {
   PROVIDER_RESPONSE_INVALID:'Відповідь Gemini не пройшла перевірку формату.',
   PROVIDER_OUTCOME_UNKNOWN:'Зв’язок перервався. Резерв збережено до звірки.',
   PROVIDER_USAGE_UNKNOWN:'Gemini не повернув дані про витрати. Резерв збережено.',
+  YOUTUBE_DURATION_REQUIRED:'YouTube не повернув тривалість. Вкажіть тривалість ролику в секундах.',
+  YOUTUBE_VIDEO_TOO_LONG:'Ролик задовгий для одного аналізу (до 3 годин).',
+  ANALYSIS_NOT_READY:'Аналіз ще не завершено.',
 };
 
 async function data<T>(url: string, signal?: AbortSignal, body?: object): Promise<T> {
@@ -74,8 +78,30 @@ export function AnalysisPanel({ videoId, transcripts, canRun }: {videoId:string;
     } finally { setPending(false); }
   }
 
+  async function createClaims(job: Job) {
+    if(pending) return;
+    setPending(true);setMessage('');
+    try {
+      const result=await data<{created:number}>('/api/analysis-jobs/'+job.id,undefined,{action:'create-claims'});
+      setMessage(result.created?`Створено чернеток тверджень: ${result.created}. Оновіть сторінку, щоб побачити їх нижче.`
+        :'Усі пропозиції вже перенесено у твердження.');
+      setSelected(await data<Job>('/api/analysis-jobs/'+job.id));
+    } catch(error) {
+      setMessage(errors[(error as Error).message]??'Не вдалося створити твердження.');
+    } finally { setPending(false); }
+  }
+
   return <section>
     <h2>Аналіз розшифрування</h2>
+    {canRun&&<form onSubmit={event=>{
+      event.preventDefault();
+      const raw=String(new FormData(event.currentTarget).get('durationSec')??'').trim();
+      void enqueue({source:'youtube',...(raw?{durationSec:Number(raw)}:{})});
+    }}>
+      <p>Gemini перегляне весь публічний ролик YouTube частинами по 8 хвилин і запропонує перевірювані твердження з таймкодами.</p>
+      <label>Тривалість, с (лише якщо YouTube не повернув її сам) <input name="durationSec" type="number" min={10} max={86400} /></label>
+      <button disabled={pending}>Проаналізувати весь ролик через Gemini</button>
+    </form>}
     {canRun&&transcripts.length>0&&<form onSubmit={event=>{
       event.preventDefault();
       const form=new FormData(event.currentTarget);
@@ -88,7 +114,7 @@ export function AnalysisPanel({ videoId, transcripts, canRun }: {videoId:string;
     </form>}
     {message&&<output role="status">{message}</output>}
     <ul>{jobs.map(job=><li key={job.id}>
-      {labels[job.status]} · {job.completed_chunks}/{job.total_chunks} · спроба {job.attempt}
+      {job.mode==='youtube'?'Весь ролик':'Розшифрування'} · {labels[job.status]} · {job.completed_chunks}/{job.total_chunks} · спроба {job.attempt}
       {job.error_code&&<p>{errors[job.error_code]??'Аналіз завершився з помилкою.'}</p>}
       {job.status==='succeeded'&&<button type="button" onClick={()=>void data<Job>('/api/analysis-jobs/'+job.id)
         .then(setSelected).catch(()=>setMessage('Не вдалося відкрити чернетки.'))}>Відкрити чернетки</button>}
@@ -96,7 +122,9 @@ export function AnalysisPanel({ videoId, transcripts, canRun }: {videoId:string;
         <form onSubmit={event=>{
           event.preventDefault();
           const form=new FormData(event.currentTarget);
-          void enqueue({transcriptId:job.transcript_id,retry:true,expectedAttempt:job.attempt,acknowledgeUnknown:form.has('ack')});
+          const retry={retry:true,expectedAttempt:job.attempt,acknowledgeUnknown:form.has('ack')};
+          void enqueue(job.mode==='youtube'?{source:'youtube',...(job.duration_sec?{durationSec:job.duration_sec}:{}),...retry}
+            :{transcriptId:job.transcript_id,...retry});
         }}>
           {job.status==='unknown'&&<label><input type="checkbox" name="ack" required /> Можливе повторне списання</label>}
           <button disabled={pending}>Повторити аналіз</button>
@@ -105,14 +133,19 @@ export function AnalysisPanel({ videoId, transcripts, canRun }: {videoId:string;
     {selected&&<article className="workflow-card">
       <h3>Чернетки Gemini</h3>
       {selected.drafts?.length===0&&<p>Gemini не запропонував тверджень.</p>}
+      {canRun&&selected.drafts?.some(draft=>!draft.claimId)&&<button type="button" disabled={pending} onClick={()=>void createClaims(selected)}>
+        Створити чернетки тверджень з усіх пропозицій</button>}
       {selected.drafts?.map((draft,index)=><article className="workflow-card" key={index}>
         <h4>{draft.question}</h4>
         <blockquote>{draft.quote}</blockquote>
+        {draft.context&&<p>{draft.context}</p>}
+        {draft.claimId&&<p>Уже перенесено у твердження.</p>}
         <p>{labels[draft.kind]} · {draft.paraphrase?'Переказ':draft.verifiedQuote?'Цитату знайдено в розшифруванні':'Потрібна ручна звірка'} ·
-          {' '}репліки {draft.segmentIds.map(id=>id+1).join(', ')}</p>
-        {canRun&&<details><summary>Перенести у твердження</summary>
+          {' '}{draft.segmentIds.length?'репліки '+draft.segmentIds.map(id=>id+1).join(', ')
+            :draft.startMs!==null&&draft.endMs!==null?`${Math.floor(draft.startMs/1000)}–${Math.ceil(draft.endMs/1000)} с`:''}</p>
+        {canRun&&!draft.claimId&&<details><summary>Перенести у твердження</summary>
           <ClaimForm videoId={videoId} transcripts={transcripts} draft={{
-            transcriptId:selected.transcript_id, quote:draft.quote, question:draft.question,
+            transcriptId:selected.transcript_id??undefined, quote:draft.quote, question:draft.question,
             startMs:draft.startMs,endMs:draft.endMs,
           }} />
         </details>}

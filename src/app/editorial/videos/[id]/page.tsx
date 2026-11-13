@@ -6,6 +6,7 @@ import { listShortRenders } from '../../../../db/shorts.mjs';
 import { loadPublications } from '../../../../db/publications.mjs';
 import { PublicationPanel, type Publication } from '../../publication-panel';
 import { AnalysisPanel } from '../../analysis-panel';
+import { ScenarioGeminiButton } from '../../scenario-gemini-button';
 import {EpisodeGrokReviewPanel,type EpisodeGrokReview} from '../../episode-grok-review-panel';
 import {listEpisodeGrokReviewsForEpisodes} from '../../../../db/episode-grok.mjs';
 import {listUsableMontagePlans} from '../../../../db/montage-plans.mjs';
@@ -142,6 +143,7 @@ export default async function VideoPage({ params, searchParams }: {
         </details>}
         <h4>Сценарії</h4>
         {author && claim.status==='approved' && <details><summary>Новий сценарій</summary><EpisodeForm claim={claim} /></details>}
+        {author && claim.status==='approved' && <ScenarioGeminiButton claimId={claim.id} />}
         {episodes.filter(episode=>episode.claim_id===claim.id).map(episode=><article className="workflow-card" key={episode.id}>
           <h5>{episode.content.title}</h5>
           <p>{byEpisode.has(episode.id)?'Опубліковано':episode.stale?'Потрібне повторне погодження':statuses[episode.status]} · версія {episode.version} · ревізія {episode.revision} · твердження {episode.claim_version}</p>

@@ -5,6 +5,7 @@ const status: Record<string,number> = {
   AUTH_REQUIRED:401, FORBIDDEN:403, ORIGIN_DENIED:403, NOT_FOUND:404,
   ATTEMPT_CONFLICT:409, RETRY_NOT_AVAILABLE:409, ACKNOWLEDGMENT_REQUIRED:409,
   INVALID_INPUT:422, TRANSCRIPT_REQUIRED:422, TRANSCRIPT_TOO_LARGE:422, SEGMENT_TOO_LARGE:422,
+  YOUTUBE_DURATION_REQUIRED:422, YOUTUBE_VIDEO_TOO_LONG:422, INVALID_YOUTUBE_URL:422, ANALYSIS_NOT_READY:409, REVISION_CONFLICT:409,
   BUDGET_EXHAUSTED:429, CONCURRENCY_LIMIT:429, ANALYSIS_DISABLED:503,
 };
 export function analysisResponse(data: unknown, code=200) {
@@ -35,7 +36,11 @@ export async function analysisInput(request: Request) {
       chunks.push(value);
     }
     const data=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks,total)));
-    if(!data||typeof data!=='object'||Array.isArray(data)||typeof data.transcriptId!=='string'
+    const youtube=data?.source==='youtube';
+    if(data?.action==='create-claims'&&Object.keys(data).length===1) return data;
+    if(!data||typeof data!=='object'||Array.isArray(data)
+      ||(youtube?(data.transcriptId!==undefined||(data.durationSec!==undefined&&!Number.isSafeInteger(data.durationSec)))
+        :typeof data.transcriptId!=='string')
       ||(data.retry!==undefined&&typeof data.retry!=='boolean')
       ||(data.acknowledgeUnknown!==undefined&&typeof data.acknowledgeUnknown!=='boolean')) throw Error('INVALID_INPUT');
     return data;
