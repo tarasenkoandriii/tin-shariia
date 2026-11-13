@@ -19,6 +19,7 @@ import { reserveShortsProposal, settleShortsProposal } from '../../../../../db/s
 import { suggestShorts } from '../../../../../analysis/shorts-proposal.mjs';
 import {queueEpisodeGrokReview,listEpisodeGrokReviews,acceptEpisodeGrokReview} from '../../../../../db/episode-grok.mjs';
 import {grokBatchConfigured} from '../../../../../analysis/grok-batch.mjs';
+import {runDirectGrokReviews} from '../../../../../analysis/episode-grok-review.mjs';
 
 type Context={params:Promise<{episodeId:string;operation:string[]}>};
 const isDownload=(operation:string[])=>operation.length===3&&operation[0]==='montages'&&operation[2]==='download';
@@ -102,7 +103,13 @@ export async function POST(request:Request,{params}:Context){
       if(input.action==='accept')return publicationReply(await acceptEpisodeGrokReview(db,identity,episodeId,input.reviewId,input.version));
       if(input.action==='run'){
         if(!grokBatchConfigured())throw Error('GROK_NOT_CONFIGURED');
-        return publicationReply(await queueEpisodeGrokReview(db,identity,episodeId),202);
+        const review=await queueEpisodeGrokReview(db,identity,episodeId);
+        // Direct mode answers within one call; run it right after the response instead of waiting for cron.
+        if(review.mode==='direct')after(async()=>{
+          try{await runDirectGrokReviews(await database(),{id:review.id,limit:1});}
+          catch{console.error('GROK_DIRECT_DISPATCH_FAILED');}
+        });
+        return publicationReply(review,202);
       }
       throw Error('INVALID_INPUT');
     }

@@ -7,7 +7,7 @@ import type {Episode} from './workflow-types';
 export type EpisodeGrokReview={id:string;episode_version:number;round:number;state:string;error_code:string|null;accepted_at:string|null;
   auto_accepted:boolean;auto_accept_threshold:number|null;created_at:string;
   result:{originalityScore:number;interestScore:number;summary:string;strengths:string[];recommendations:{change:string;reason:string;priority:string}[];factRisks:string[];limits:string}|null};
-const labels:Record<string,string>={queued:'Очікує фонової перевірки',submitting:'Надсилається в Grok Batch',submitted:'Grok аналізує у фоні',succeeded:'Є рекомендації для редактора',accepted:'Сценарій допущено до генерації відео',failed:'Не вдалося перевірити',unknown:'Невідомо, чи прийняв Grok запит; повтор не запускається'};
+const labels:Record<string,string>={queued:'Очікує фонової перевірки',submitting:'Grok аналізує сценарій',submitted:'Grok Batch аналізує у фоні',succeeded:'Є рекомендації для редактора',accepted:'Сценарій допущено до генерації відео',failed:'Не вдалося перевірити',unknown:'Невідомо, чи прийняв Grok запит; повтор не запускається'};
 
 export function EpisodeGrokReviewPanel({episode,reviews,canRun,canAccept}:{episode:Episode;reviews:EpisodeGrokReview[];canRun:boolean;canAccept:boolean}){
   const router=useRouter(),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
@@ -21,16 +21,16 @@ export function EpisodeGrokReviewPanel({episode,reviews,canRun,canAccept}:{episo
         body:JSON.stringify(action==='run'?{action}:{action,reviewId:latest?.id,version:episode.version})});
       const body=await response.json();
       if(!response.ok)throw Error(body.error?.code??'REQUEST_FAILED');
-      setMessage(action==='run'?'Прохід поставлено у фонову чергу. Результат з’явиться тут.':'Сценарій допущено до відеогенерації.');router.refresh();
+      setMessage(action==='run'?'Прохід запущено. Результат з’явиться тут.':'Сценарій допущено до відеогенерації.');router.refresh();
     }catch(error){
       const code=(error as Error).message;
-      setMessage(code==='GROK_MONTHLY_LIMIT'?'Вичерпано місячний ліміт Grok Batch $5.':
+      setMessage(code==='GROK_MONTHLY_LIMIT'?'Вичерпано місячний ліміт Grok $5.':
         code==='GROK_NOT_CONFIGURED'?'Grok API ще не налаштовано в Production.':
         code==='GROK_REVIEW_PENDING'?'Поточний прохід ще виконується.':`Не вдалося завершити дію (${code}).`);
     }finally{setBusy(false);}
   }
   return <section className="workflow-card">
-    <h5>Перед генерацією відео · Grok Batch</h5>
+    <h5>Перед генерацією відео · Grok</h5>
     <p>Grok порівнює сценарій із джерелами та результатами попередніх публікацій каналу, оцінює новизну й інтерес, пропонує конкретні правки. Він не переписує сценарій сам: автор вносить зміни, проходить погодження нової версії та за потреби запускає наступний прохід.</p>
     {latest&&<article>
       <strong>Версія {latest.episode_version} · прохід {latest.round}: {labels[latest.state]??latest.state}</strong>
@@ -49,7 +49,7 @@ export function EpisodeGrokReviewPanel({episode,reviews,canRun,canAccept}:{episo
       {latest.state==='succeeded'&&canAccept&&<button disabled={busy} onClick={()=>void act('accept')}>Погодити сценарій для генерації відео</button>}
     </article>}
     {canRun&&<button disabled={busy||!!active} onClick={()=>void act('run')}>
-      {active?'Прохід виконується…':latest?.state==='accepted'?'Запросити ще один прохід Grok':'Перевірити сценарій через Grok Batch'}
+      {active?'Прохід виконується…':latest?.state==='accepted'?'Запросити ще один прохід Grok':'Перевірити сценарій через Grok'}
     </button>}
     {reviews.filter(item=>item.episode_version!==episode.version).length>0&&<p>Є попередні проходи для старих версій сценарію; вони не допускають поточну версію до генерації.</p>}
     {message&&<output role="status">{message}</output>}

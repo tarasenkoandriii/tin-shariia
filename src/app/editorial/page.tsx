@@ -11,7 +11,7 @@ import { EditorialVideosTable } from './editorial-videos-table';
 import { YouTubeConnectionPanel } from './youtube-connection-panel';
 import { getYouTubeConnection } from '../../db/youtube-uploads.mjs';
 import {GrokSettings} from './grok-settings';
-import {readGrokAutoAcceptScore} from '../../db/episode-grok.mjs';
+import {readGrokSettings} from '../../db/episode-grok.mjs';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +22,7 @@ export default async function Editorial({searchParams}:{searchParams:Promise<{yo
   const member = await activeMember(db, id);
   if (!member) return <main><UserButton /><h1>Доступ до редакції закрито</h1><Link href="/invite">Маю запрошення</Link></main>;
   const access = member.roles.includes('admin') ? await listAccess(db, id) : null;
-  const grokAutoAcceptScore = access ? await readGrokAutoAcceptScore(db,id) : null;
+  const grokSettings = access ? await readGrokSettings(db,id) : null;
   const youtubeConnection = member.roles.includes('publisher') ? await getYouTubeConnection(db,id) : null;
   const youtubeOAuthConfigured=Boolean(process.env.GOOGLE_YOUTUBE_CLIENT_ID&&process.env.GOOGLE_YOUTUBE_CLIENT_SECRET
     &&process.env.YOUTUBE_TOKEN_ENCRYPTION_KEY);
@@ -76,6 +76,6 @@ export default async function Editorial({searchParams}:{searchParams:Promise<{yo
           <ul>{access.invitations.map((invite: { email: string }) => <li key={invite.email}>{invite.email}<CancelInviteForm email={invite.email} /></li>)}</ul>}
       </details>
     </section>}
-    {access&&grokAutoAcceptScore!==null&&<GrokSettings initialScore={grokAutoAcceptScore} />}
+    {access&&grokSettings!==null&&<GrokSettings initialScore={grokSettings.autoAcceptScore} initialMode={grokSettings.grokMode==='batch'?'batch':'direct'} />}
   </main>;
 }
