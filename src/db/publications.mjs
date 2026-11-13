@@ -158,7 +158,7 @@ export function changeCorrection(db,identity,publicationId,input){
     if((review&&correction.status!=='review')||(action==='post'&&correction.status!=='approved')||(!review&&action!=='post')){
       throw Error('INVALID_TRANSITION');
     }
-    if(action==='approve'&&correction.created_by===member.id) throw Error('SELF_APPROVAL');
+    if(action==='approve'&&correction.created_by===member.id&&!member.roles.includes('admin')) throw Error('SELF_APPROVAL');
     const comment=review?string(input.comment,4000,action==='return'):correction.review_comment;
     const location=action==='post'?string(input.location,2000,true):null;
     const status=action==='approve'?'approved':action==='return'?'returned':'posted';

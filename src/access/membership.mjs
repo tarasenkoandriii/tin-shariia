@@ -17,7 +17,9 @@ export async function activeMember(db, clerkId) {
     `SELECT m.id, m.email, ARRAY(SELECT role FROM member_roles WHERE member_id = m.id ORDER BY role) AS roles
      FROM members m WHERE clerk_user_id = $1 AND revoked_at IS NULL`, [clerkId],
   );
-  return member ?? null;
+  if (!member) return null;
+  // Product rule: an admin holds every editorial role (author, factchecker, editor, publisher).
+  return member.roles.includes('admin') ? { ...member, roles: [...roles] } : member;
 }
 
 async function serialized(db, operation) {

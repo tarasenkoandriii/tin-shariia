@@ -112,7 +112,8 @@ export function changeEditorial(db, identity, kind, input) {
           `SELECT * FROM ${config.versions} WHERE ${config.key} = $1 AND version = $2`, [item.id, item.version],
         );
         if (reviewing && item.status !== 'review') throw new Error('INVALID_TRANSITION');
-        if (reviewing && action === 'approve'
+        // Admins may approve their own work; everyone else needs an independent reviewer.
+        if (reviewing && action === 'approve' && !member.roles.includes('admin')
             && (version.author_id === member.id || item.created_by === member.id)) {
           throw new Error('SELF_APPROVAL');
         }

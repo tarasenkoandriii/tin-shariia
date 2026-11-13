@@ -46,7 +46,12 @@ test('editorial HTTP workflow enforces revisions, independent approvals and evid
       assert.deepEqual(await response,[status,{error:{code}}]);
     }
     await fails(send('claims',null,draft),401,'AUTH_REQUIRED');
-    await fails(send('claims','admin',draft),403,'FORBIDDEN');
+    await fails(send('claims','publisher',draft),403,'FORBIDDEN');
+    // Admin holds every role and may approve own work (single-person desk); others still need an independent reviewer.
+    let own=take(await send('claims','admin',draft));
+    own=take(await change('claims','admin',own,'submit'));
+    own=take(await change('claims','admin',own,'approve'));
+    assert.equal(own.status,'approved');
     await fails(send('claims','writer',draft,{requestOrigin:'https://other.example.test'}),403,'ORIGIN_DENIED');
     await fails(send('claims','writer',{...draft,transcriptId:foreign.id}),422,'TRANSCRIPT_MISMATCH');
     await fails(send('claims','writer',{...draft,evidence:[{...draft.evidence[0],url:'javascript:alert(1)'}]}),422,'INVALID_INPUT');

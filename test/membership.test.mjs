@@ -12,7 +12,8 @@ test('editorial access is invite-only, revocable, role-scoped and audited', asyn
     await db.exec(await readFile(new URL('../drizzle/0001_editorial_access.sql', import.meta.url), 'utf8'));
     const owner = await bootstrapAdmin(db, { clerkId: 'owner', verifiedEmail: 'owner@example.test' });
     await assert.rejects(bootstrapAdmin(db, { clerkId: 'outsider', verifiedEmail: 'outside@example.test' }), /ALREADY_INITIALIZED/);
-    assert.deepEqual((await activeMember(db, 'owner')).roles, ['admin']);
+    // An admin holds every role (single-person desk).
+    assert.deepEqual((await activeMember(db, 'owner')).roles, ['author', 'factchecker', 'editor', 'publisher', 'admin']);
     assert.equal(await activeMember(db, 'outsider'), null);
     const invite = email => createInvitation(db, 'owner', { email, requestedRoles: ['author'] });
     const accept = (token, clerkId, verifiedEmails) => acceptInvitation(db, { token, clerkId, verifiedEmails });
