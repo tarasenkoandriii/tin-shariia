@@ -1,3 +1,4 @@
+import { youtubeApiErrorDetails } from '../youtube/api-error.mjs';
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 
@@ -115,7 +116,7 @@ export async function youtubeDurationSec(youtubeId, { apiKey=process.env.YOUTUBE
   url.searchParams.set('part','contentDetails'); url.searchParams.set('id',youtubeId); url.searchParams.set('key',apiKey);
   try {
     const response = await fetchImpl(url, { signal:AbortSignal.timeout(10_000), cache:'no-store' });
-    if (!response.ok) { console.error('YOUTUBE_DURATION_FAILED', { status:response.status }); return null; }
+    if (!response.ok) { console.error('YOUTUBE_DURATION_FAILED', await youtubeApiErrorDetails(response)); return null; }
     const value = (await response.json())?.items?.[0]?.contentDetails?.duration;
     const match = /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(value ?? '');
     if (!match) return null;

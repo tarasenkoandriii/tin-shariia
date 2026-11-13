@@ -1,3 +1,5 @@
+import { youtubeApiErrorDetails } from './api-error.mjs';
+
 export const SHARIY_CHANNEL_ID = 'UCVPYbobPRzz0SjinWekjUBw';
 export const YOUTUBE_PAGE_SIZE = 20;
 const API = 'https://www.googleapis.com/youtube/v3';
@@ -22,8 +24,9 @@ async function youtube(path, params, apiKey) {
   const response = await fetch(url, { signal: AbortSignal.timeout(12_000), next: { revalidate: 300 } });
   if (!response.ok) {
     const error = new Error('YOUTUBE_UPSTREAM_ERROR');
-    error.status = response.status;
-    try { error.reason = (await response.json())?.error?.errors?.[0]?.reason; } catch { /* Ignore provider body. */ }
+    const details = await youtubeApiErrorDetails(response);
+    Object.assign(error, details);
+    console.warn('YOUTUBE_CHANNEL_API_FAILED', { endpoint:path, ...details });
     throw error;
   }
   return response.json();
