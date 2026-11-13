@@ -4,9 +4,9 @@ import {useMemo,useState} from 'react';
 import Link from 'next/link';
 
 type CommentRow={id:string;episode_title:string|null;parent_video_id:string;short_video_id:string;state:string;draft_text:string|null;final_text:string|null;
-  scheduled_at:string|null;published_at:string|null;error_code:string|null;click_count:number;tracking_token:string;main_video_id:string};
+  scheduled_at:string|null;published_at:string|null;error_code:string|null;click_count:number;tracking_token:string;target_kind:string;approved_channel_id:string|null};
 export type CommentDashboardData={settings:{enabled:boolean;interval_hours:number};connection:{channelTitle:string;channelId:string;commentScope:boolean}|null;
-  comments:CommentRow[];chart:{hour:string;clicks:number}[];publishedMarkers:{publishedAt:string;shortVideoId:string;clicks:number}[];shortLinkOrigin:string;totalClicks:number;chartEnd:string};
+  comments:CommentRow[];chart:{hour:string;clicks:number}[];candidates:{id:string;title:string;short_video_id:string;source_video_id:string}[];publishedMarkers:{id:string;parentVideoId:string;publishedAt:string;shortVideoId:string;clicks:number}[];shortLinkOrigin:string;totalClicks:number;chartEnd:string};
 
 const labels:Record<string,string>={queued:'У черзі Grok',submitting:'Передається Grok',submitted:'Grok аналізує',succeeded:'Чекає схвалення',scheduled:'Заплановано',publishing:'Публікується',published:'Опубліковано',failed:'Помилка',rejected:'Відхилено',unknown:'Потрібна перевірка'};
 const stamp=(value:string|null)=>value?new Intl.DateTimeFormat('uk-UA',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Kyiv'}).format(new Date(value)):'—';
@@ -14,6 +14,19 @@ const stamp=(value:string|null)=>value?new Intl.DateTimeFormat('uk-UA',{dateStyl
 export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:CommentDashboardData;canManage:boolean;canApprove:boolean}){
   const [data,setData]=useState(initial),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[enabled,setEnabled]=useState(initial.settings.enabled),[hours,setHours]=useState(initial.settings.interval_hours);
   const [consented,setConsented]=useState(false);
+  const [edits,setEdits]=useState<Record<string,string>>({});
+  const errors:Record<string,string>={
+    YOUTUBE_COMMENT_WRONG_TARGET_CHANNEL:'Вихідне відео належить іншому каналу.',
+    YOUTUBE_COMMENT_TARGET_UNVERIFIED:'Не вдалося підтвердити цільове відео через YouTube.',
+    YOUTUBE_COMMENT_SHORT_NOT_PUBLIC:'Shorts має бути публічним і належати підключеному каналу.',
+    YOUTUBE_COMMENT_APPROVAL_CHANGED:'Ціль, канал або посилання змінилися. Оновіть сторінку.',
+    BUDGET_EXHAUSTED:'Ліміт Grok вичерпано. Ви можете написати коментар вручну.',
+    YOUTUBE_COMMENT_SCOPE_REQUIRED:'Потрібен дозвіл YouTube на коментарі.',
+    YOUTUBE_COMMENT_TEXT_INVALID:'Введіть текст коментаря без посилань (до 1200 символів).',
+    YOUTUBE_COMMENTSDISABLED:'YouTube вимкнув коментарі до цього відео.',
+    YOUTUBE_FORBIDDEN:'YouTube відмовив у публікації коментаря.',
+    YOUTUBE_COMMENT_OUTCOME_UNKNOWN:'Результат невідомий. Перевірте коментарі на YouTube.',
+  };
   const bins=useMemo(()=>{
     const end=new Date(data.chartEnd).getTime(),start=end-7*24*60*60*1000,step=3*60*60*1000,count=56;
     const values=Array.from({length:count},(_,i)=>({time:start+i*step,clicks:0}));
@@ -23,7 +36,7 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
     return {values,max,markers,start,end};
   },[data]);
   async function refresh(){const response=await fetch('/api/editorial/youtube-comments',{cache:'no-store'});if(!response.ok)throw Error('Не вдалося оновити статистику.');const body=await response.json();setData(body.data);}
-  async function post(payload:Record<string,unknown>){setBusy(true);setMessage('');try{const response=await fetch('/api/editorial/youtube-comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const body=await response.json().catch(()=>null);if(!response.ok)throw Error(body?.error?.code??'Не вдалося зберегти.');await refresh();setMessage('Збережено.');}catch(error){setMessage(error instanceof Error?error.message:'Сталася помилка.');}finally{setBusy(false);}}
+  async function post(payload:Record<string,unknown>){setBusy(true);setMessage('');try{const response=await fetch('/api/editorial/youtube-comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const body=await response.json().catch(()=>null);if(!response.ok)throw Error(body?.error?.code??'Не вдалося зберегти.');await refresh();setMessage('Збережено.');}catch(error){setMessage(error instanceof Error?(errors[error.message]??error.message):'Сталася помилка.');}finally{setBusy(false);}}
   const needsScope=!data.connection?.commentScope;
   return <>
     <section className="youtube-comment-settings workflow-card">
@@ -51,7 +64,7 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
       <div className="youtube-chart-wrap"><svg viewBox="0 0 1000 260" role="img" aria-label="Графік переходів з коментарів за 7 днів">
         {[0,1,2,3].map(line=><line key={line} x1="48" x2="985" y1={24+line*62} y2={24+line*62} className="youtube-chart-grid" />)}
         {bins.values.map((bin,index)=>{const width=937/bins.values.length,bar=Math.max(1,bin.clicks/bins.max*176);return <rect key={index} x={48+index*width+1} y={208-bar} width={Math.max(2,width-2)} height={bar} rx="2" className="youtube-chart-bar"><title>{stamp(new Date(bin.time).toISOString())}: {bin.clicks} переходів</title></rect>;})}
-        {bins.markers.map(({x,item})=><g key={item.shortVideoId+item.publishedAt}><line x1={48+x*9.37} x2={48+x*9.37} y1="18" y2="218" className="youtube-chart-publish"/><circle cx={48+x*9.37} cy="16" r="5" className="youtube-chart-publish-dot"><title>Коментар опубліковано {stamp(item.publishedAt)} · Shorts {item.shortVideoId}</title></circle></g>)}
+        {bins.markers.map(({x,item})=><g key={item.id}><line x1={48+x*9.37} x2={48+x*9.37} y1="18" y2="218" className="youtube-chart-publish"/><circle cx={48+x*9.37} cy="16" r="5" className="youtube-chart-publish-dot"><title>Коментар опубліковано {stamp(item.publishedAt)} · відео {item.parentVideoId} · Shorts {item.shortVideoId} · {item.clicks} переходів</title></circle></g>)}
         <text x="48" y="246">{stamp(new Date(bins.start).toISOString())}</text><text x="890" y="246">Зараз</text>
       </svg></div>
       <p className="youtube-chart-legend"><i /> переходи <b /> час публікації коментаря</p>
@@ -59,18 +72,40 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
     </section>
     <section className="youtube-comment-list">
       <h2>Чернетки й публікації</h2>
+      {canApprove&&<form className="workflow-card" onSubmit={event=>{
+        event.preventDefault();
+        const form=new FormData(event.currentTarget);
+        const generate=(event.nativeEvent as SubmitEvent).submitter?.getAttribute('value')==='grok';
+        void post({action:'draft',uploadId:form.get('uploadId'),targetKind:form.get('targetKind'),text:form.get('text'),generate});
+      }}>
+        <label>Shorts <select name="uploadId" required defaultValue="">
+          <option value="" disabled>Оберіть публічний Shorts</option>
+          {data.candidates.map(item=><option key={item.id} value={item.id}>{item.title} · {item.short_video_id}</option>)}
+        </select></label>
+        <label>Ціль <select name="targetKind"><option value="main">Наш основний випуск</option><option value="source">Вихідне відео</option></select></label>
+        <label>Текст українською <textarea name="text" maxLength={1200} /></label>
+        <button disabled={busy||needsScope}>Створити чернетку</button>
+        <button disabled={busy||needsScope} value="grok">Запропонувати текст через Grok</button>
+      </form>}
+      <p>Клікабельність посилання залежить від YouTube. Перевірте її після публікації.</p>
       {!data.comments.length&&<p>Коли буде опубліковано Shorts до основного відео, після ввімкнення розкладу Grok підготує чернетку.</p>}
       {data.comments.map(item=><article className="workflow-card youtube-comment-card" key={item.id}>
         <header><div><h3>{item.episode_title||'Відео'}</h3><p>{labels[item.state]??item.state}</p></div><strong>{item.click_count} переходів</strong></header>
-        <p>Основне відео: <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(item.main_video_id)}`} target="_blank" rel="noreferrer">відкрити на YouTube</a></p>
+        <p>{item.target_kind==='source'?'Вихідне відео':'Наш основний випуск'}: <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(item.parent_video_id)}`} target="_blank" rel="noreferrer">відкрити на YouTube</a></p>
         <p>Підтверджувальний Shorts: <a href={`https://www.youtube.com/shorts/${encodeURIComponent(item.short_video_id)}`} target="_blank" rel="noreferrer">відкрити Shorts</a></p>
-        {item.draft_text&&<blockquote><strong>Перевір текст із посиланням, який буде опубліковано:</strong><br/>{item.draft_text}<br/><br/>
+        <p>Канал публікації: {item.approved_channel_id??data.connection?.channelTitle??'—'}</p>
+        {(item.draft_text||item.state==='succeeded')&&<blockquote><strong>Перевір текст із посиланням, який буде опубліковано:</strong><br/>{edits[item.id]?.trim()??item.draft_text}<br/><br/>
           <a href={`${data.shortLinkOrigin}/go/short/${encodeURIComponent(item.tracking_token)}`} target="_blank" rel="noreferrer">{data.shortLinkOrigin}/go/short/{item.tracking_token}</a></blockquote>}
         {item.final_text&&<blockquote><strong>Точний схвалений текст:</strong><br/>{item.final_text}</blockquote>}
         <p>Опубліковано: {stamp(item.published_at)}{item.scheduled_at&&!item.published_at?` · заплановано ${stamp(item.scheduled_at)}`:''}</p>
-        {item.error_code&&<p role="alert">{item.error_code}</p>}
+        {item.error_code&&<p role="alert">{errors[item.error_code]??item.error_code}</p>}
         {item.state==='succeeded'&&canApprove&&<div className="youtube-comment-actions">
-          <button type="button" disabled={busy||!enabled||needsScope} onClick={()=>void post({action:'approve',id:item.id})}>Схвалити й запланувати</button>
+          <label>Текст коментаря <textarea maxLength={1200} value={edits[item.id]??item.draft_text??''}
+            onChange={event=>setEdits(previous=>({...previous,[item.id]:event.target.value}))} /></label>
+          <button type="button" disabled={busy||!data.settings.enabled||needsScope||!(edits[item.id]??item.draft_text)?.trim()}
+            onClick={()=>void post({action:'approve',id:item.id,text:edits[item.id]??item.draft_text,
+              targetVideoId:item.parent_video_id,channelId:data.connection?.channelId,
+              link:`${data.shortLinkOrigin}/go/short/${encodeURIComponent(item.tracking_token)}`})}>Схвалити й запланувати</button>
           <button type="button" className="secondary-button" disabled={busy} onClick={()=>void post({action:'reject',id:item.id})}>Відхилити</button>
         </div>}
       </article>)}

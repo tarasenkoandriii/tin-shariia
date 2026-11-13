@@ -16,7 +16,7 @@ export default async function YouTubeCommentsPage(){
   const initial=await loadYouTubeCommentDashboard(db,identity) as CommentDashboardData;
   return <main className="editorial-workspace youtube-comment-page">
     <header className="editorial-header"><Link href="/editorial">← До редакції</Link><UserButton /></header>
-    <h1>Коментарі до основних відео</h1>
+    <h1>Коментарі до випусків і вихідних відео</h1>
     <p>Grok готує доречну чернетку для опублікованого Shorts. Редактор переглядає точний текст і посилання; тільки після схвалення коментар потрапляє в чергу публікації.</p>
     <YouTubeCommentDashboard initial={initial} canManage={member.roles.includes('admin')} canApprove={member.roles.includes('editor')} />
   </main>;

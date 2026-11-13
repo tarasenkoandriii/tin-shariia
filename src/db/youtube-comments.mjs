@@ -1,3 +1,4 @@
+import {verifyYouTubeCommentTarget} from '../youtube/comment-target.mjs';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {activeMember} from '../access/membership.mjs';
 import {uuid} from '../editorial/workflow-input.mjs';
@@ -25,18 +26,18 @@ export async function loadYouTubeCommentDashboard(db,identity){
   const [{rows:[settings]},{rows:[connection]},{rows:comments},{rows:chart},{rows:[clickTotals]}]=await Promise.all([
     db.query('SELECT enabled,interval_hours,updated_at FROM youtube_comment_settings WHERE id=1'),
     db.query(`SELECT channel_title,channel_id,scopes FROM youtube_connections WHERE disconnected_at IS NULL ORDER BY connected_at DESC LIMIT 1`),
-    db.query(`SELECT c.id,c.episode_id,c.parent_video_id,c.short_video_id,c.tracking_token,c.state,c.draft_text,c.final_text,
+    db.query(`SELECT c.id,c.episode_id,c.target_kind,c.approved_channel_id,c.parent_video_id,c.short_video_id,c.tracking_token,c.state,c.draft_text,c.final_text,
       c.scheduled_at,c.published_at,c.youtube_comment_id,c.error_code,c.created_at,
-      p.youtube_id AS main_video_id,c.input_snapshot->>'parentTitle' AS episode_title,
+      c.input_snapshot->>'parentTitle' AS episode_title,
       (SELECT count(*)::integer FROM youtube_short_comment_clicks x WHERE x.comment_id=c.id) AS click_count
-      FROM youtube_short_comments c JOIN publications p ON p.id=c.publication_id AND p.episode_id=c.episode_id
+      FROM youtube_short_comments c
       ORDER BY COALESCE(c.published_at,c.scheduled_at,c.created_at) DESC LIMIT 100`),
     db.query(`SELECT date_trunc('hour',clicked_at) AS hour,count(*)::integer AS clicks
       FROM youtube_short_comment_clicks WHERE clicked_at>=now()-interval '7 days'
       GROUP BY 1 ORDER BY 1`),
     db.query('SELECT count(*)::integer AS total_clicks FROM youtube_short_comment_clicks'),
   ]);
-  const result=await db.query(`SELECT c.published_at,c.short_video_id,count(x.id)::integer AS clicks
+  const result=await db.query(`SELECT c.id,c.parent_video_id,c.published_at,c.short_video_id,count(x.id)::integer AS clicks
     FROM youtube_short_comments c LEFT JOIN youtube_short_comment_clicks x ON x.comment_id=c.id
     WHERE c.state='published' AND c.published_at>=now()-interval '7 days'
     GROUP BY c.id ORDER BY c.published_at`);
@@ -46,7 +47,11 @@ export async function loadYouTubeCommentDashboard(db,identity){
     chart:chart.map(row=>({hour:row.hour,clicks:Number(row.clicks)})),
     totalClicks:Number(clickTotals.total_clicks),
     chartEnd:new Date().toISOString(),
-    publishedMarkers:result.rows.map(row=>({publishedAt:row.published_at,shortVideoId:row.short_video_id,clicks:Number(row.clicks)})),
+    publishedMarkers:result.rows.map(row=>({id:row.id,parentVideoId:row.parent_video_id,publishedAt:row.published_at,shortVideoId:row.short_video_id,clicks:Number(row.clicks)})),
+    candidates:(await db.query(`SELECT u.id,u.title,u.youtube_id AS short_video_id,v.youtube_id AS source_video_id
+      FROM youtube_short_uploads u JOIN episodes e ON e.id=u.episode_id JOIN claims c ON c.id=e.claim_id
+      JOIN videos v ON v.id=c.video_id WHERE u.state='published' AND u.actual_privacy_status='public'
+      ORDER BY u.updated_at DESC LIMIT 100`)).rows,
     shortLinkOrigin:origin()};
 }
 
@@ -64,24 +69,28 @@ export async function updateYouTubeCommentSettings(db,identity,{enabled,interval
   });
 }
 
-export async function approveYouTubeComment(db,identity,id){
+export async function approveYouTubeComment(db,identity,id,input,verify=verifyYouTubeCommentTarget){
   return db.transaction(async tx=>{
     const member=await activeMember(tx,identity);
     if(!member?.roles.includes('editor'))throw Error('FORBIDDEN');
     const {rows:[settings]}=await tx.query('SELECT enabled,interval_hours FROM youtube_comment_settings WHERE id=1 FOR UPDATE');
     if(!settings?.enabled)throw Error('YOUTUBE_COMMENT_SCHEDULE_DISABLED');
-    const {rows:[connection]}=await tx.query('SELECT scopes FROM youtube_connections WHERE disconnected_at IS NULL LIMIT 1');
+    const {rows:[connection]}=await tx.query('SELECT scopes,channel_id FROM youtube_connections WHERE disconnected_at IS NULL LIMIT 1');
     if(!connection?.scopes?.includes(COMMENT_SCOPE))throw Error('YOUTUBE_COMMENT_SCOPE_REQUIRED');
-    const {rows:[row]}=await tx.query(`SELECT id,draft_text,tracking_token,state FROM youtube_short_comments WHERE id=$1 FOR UPDATE`,[uuid(id)]);
-    if(!row||row.state!=='succeeded'||typeof row.draft_text!=='string')throw Error('YOUTUBE_COMMENT_NOT_READY');
+    const {rows:[row]}=await tx.query(`SELECT id,draft_text,tracking_token,state,parent_video_id,short_video_id,target_kind FROM youtube_short_comments WHERE id=$1 FOR UPDATE`,[uuid(id)]);
+    if(!row||row.state!=='succeeded')throw Error('YOUTUBE_COMMENT_NOT_READY');
     const link=new URL('/go/short/'+encodeURIComponent(row.tracking_token),origin()).toString();
-    const finalText=row.draft_text.trim()+'\n\n'+link;
+    const text=commentText(input.text);
+    if(input.targetVideoId!==row.parent_video_id||input.channelId!==connection.channel_id||input.link!==link)
+      throw Error('YOUTUBE_COMMENT_APPROVAL_CHANGED');
+    await verify({...row,...connection});
+    const finalText=text+'\n\n'+link;
     if(finalText.length>2000)throw Error('YOUTUBE_COMMENT_TEXT_TOO_LONG');
     const {rows:[last]}=await tx.query(`SELECT COALESCE(max(COALESCE(published_at,scheduled_at)),now()) AS last_at
       FROM youtube_short_comments WHERE state IN ('scheduled','publishing','published')`);
     const {rows:[scheduled]}=await tx.query(`UPDATE youtube_short_comments SET state='scheduled',final_text=$2,
-      scheduled_at=GREATEST(now(),$3::timestamptz+($4::text||' hours')::interval),approved_by=$5,approved_at=now(),updated_at=now()
-      WHERE id=$1 AND state='succeeded' RETURNING id,state,scheduled_at,final_text`,[row.id,finalText,last.last_at,settings.interval_hours,member.id]);
+      scheduled_at=GREATEST(now(),$3::timestamptz+($4::text||' hours')::interval),approved_by=$5,approved_channel_id=$6,approved_at=now(),updated_at=now()
+      WHERE id=$1 AND state='succeeded' RETURNING id,state,scheduled_at,final_text`,[row.id,finalText,last.last_at,settings.interval_hours,member.id,connection.channel_id]);
     if(!scheduled)throw Error('YOUTUBE_COMMENT_NOT_READY');
     await tx.query(`INSERT INTO youtube_short_comment_events(comment_id,actor_id,action,details) VALUES($1,$2,'approved',$3::text::jsonb)`,
       [row.id,member.id,json({scheduledAt:scheduled.scheduled_at,intervalHours:settings.interval_hours})]);
@@ -101,11 +110,19 @@ export async function rejectYouTubeComment(db,identity,id){
   });
 }
 
-export async function queueYouTubeCommentDrafts(db){
+export async function queueYouTubeCommentDrafts(db,{autoGenerate=true}={}){
   return db.transaction(async tx=>{
     await tx.query('SELECT pg_advisory_xact_lock(72036599)');
+    await tx.query(`UPDATE youtube_short_comments SET state='succeeded',error_code='GROK_COMMENT_DRAFT_INTERRUPTED',
+      updated_at=now() WHERE state='submitting' AND batch_id IS NULL AND updated_at<now()-interval '10 minutes'`);
+    const {rows:queued}=await tx.query(`SELECT id,batch_request_id,input_snapshot FROM youtube_short_comments
+      WHERE state='queued' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`);
+    if(queued.length){
+      await tx.query("UPDATE youtube_short_comments SET state='submitting',attempt=attempt+1,updated_at=now() WHERE id=$1",[queued[0].id]);
+      return queued;
+    }
     const {rows:[settings]}=await tx.query('SELECT enabled FROM youtube_comment_settings WHERE id=1');
-    if(!settings?.enabled)return [];
+    if(!settings?.enabled||!autoGenerate)return [];
     const {rows:[pending]}=await tx.query(`SELECT id FROM youtube_short_comments
       WHERE state IN ('queued','submitting','submitted','succeeded','scheduled','publishing','unknown') LIMIT 1`);
     if(pending)return [];
@@ -115,16 +132,17 @@ export async function queueYouTubeCommentDrafts(db){
     const slots=Math.max(0,Math.min(3,Math.floor((MONTHLY_CAP_MICROS-Number(budget.used))/RESERVE_MICROS)));
     if(!slots)return [];
     const {rows:candidates}=await tx.query(`SELECT u.id AS upload_id,u.episode_id,u.youtube_id AS short_video_id,u.title AS short_title,
-      p.id AS publication_id,p.youtube_id AS parent_video_id,p.published_at AS main_published_at,ev.content AS episode,c.content AS claim
+      p.id AS publication_id,p.youtube_id AS parent_video_id,p.published_at AS main_published_at,ev.content AS episode,cv.content AS claim
       FROM youtube_short_uploads u JOIN publications p ON p.episode_id=u.episode_id
       JOIN episode_media_revisions m ON m.id=u.media_revision_id
       JOIN episode_versions ev ON ev.episode_id=u.episode_id AND ev.version=m.episode_version
+      JOIN claim_versions cv ON cv.claim_id=ev.claim_id AND cv.version=ev.claim_version
       JOIN episodes e ON e.id=u.episode_id JOIN claims c ON c.id=e.claim_id
       JOIN youtube_connections active ON active.disconnected_at IS NULL AND active.scopes @> ARRAY[$1]::text[]
-      WHERE u.state='published' AND u.youtube_id IS NOT NULL AND p.youtube_id IS NOT NULL
+      WHERE u.state='published' AND u.actual_privacy_status='public' AND u.youtube_id IS NOT NULL AND p.youtube_id IS NOT NULL
         AND EXISTS(SELECT 1 FROM publication_youtube_stats s WHERE s.publication_id=p.id AND s.channel_id=active.channel_id AND s.error_code IS NULL)
         AND EXISTS(SELECT 1 FROM publication_youtube_stats s WHERE s.upload_id=u.id AND s.channel_id=active.channel_id AND s.error_code IS NULL)
-        AND NOT EXISTS(SELECT 1 FROM youtube_short_comments x WHERE x.upload_id=u.id)
+        AND NOT EXISTS(SELECT 1 FROM youtube_short_comments x WHERE (x.upload_id=u.id AND x.target_kind='main') OR (x.parent_video_id=p.youtube_id AND x.short_video_id=u.youtube_id))
       ORDER BY u.updated_at LIMIT 1 FOR UPDATE OF u SKIP LOCKED`,[COMMENT_SCOPE]);
     for(const row of candidates){
       const requestId=randomUUID(),trackingToken=randomBytes(24).toString('base64url');
@@ -140,13 +158,6 @@ export async function queueYouTubeCommentDrafts(db){
     for(const job of jobs)await tx.query(`UPDATE youtube_short_comments SET state='submitting',attempt=attempt+1,updated_at=now() WHERE id=$1`,[job.id]);
     return jobs;
   });
-}
-
-export async function saveYouTubeCommentDraftSubmission(db,ids,batchId,errorCode=null,unknown=false){
-  if(!ids.length)return;
-  await db.query(`UPDATE youtube_short_comments SET state=$2,batch_id=$3,error_code=$4,
-    reserved_micros=CASE WHEN $5 AND NOT $6 THEN 0 ELSE reserved_micros END,
-    updated_at=now() WHERE id=ANY($1::uuid[])`,[ids,unknown?'unknown':errorCode?'failed':'submitted',batchId,errorCode,Boolean(errorCode&&!unknown),unknown]);
 }
 
 export async function completeYouTubeCommentDraftBatch(db,batchId,results){
@@ -168,14 +179,18 @@ export async function completeYouTubeCommentDraftBatch(db,batchId,results){
 export async function claimScheduledYouTubeComment(db){
   return db.transaction(async tx=>{
     await tx.query(`UPDATE youtube_short_comments SET state='unknown',error_code='YOUTUBE_COMMENT_OUTCOME_UNKNOWN',updated_at=now()
-      WHERE state='publishing' AND lease_until<now()-interval '10 minutes'`);
-    const {rows:[settings]}=await tx.query('SELECT enabled FROM youtube_comment_settings WHERE id=1');
+      WHERE state='publishing' AND lease_until<now()`);
+    const {rows:[settings]}=await tx.query('SELECT enabled,interval_hours FROM youtube_comment_settings WHERE id=1 FOR UPDATE');
     if(!settings?.enabled)return null;
-    const {rows:[row]}=await tx.query(`SELECT c.id,c.final_text,c.parent_video_id,c.short_video_id,c.tracking_token,
+    const {rows:[recent]}=await tx.query(`SELECT id FROM youtube_short_comments
+      WHERE state IN ('publishing','unknown') AND approved_at IS NOT NULL
+        OR state='published' AND published_at>now()-($1::text||' hours')::interval LIMIT 1`,[settings.interval_hours]);
+    if(recent)return null;
+    const {rows:[row]}=await tx.query(`SELECT c.id,c.final_text,c.parent_video_id,c.short_video_id,c.tracking_token,c.target_kind,c.approved_channel_id,
       y.channel_title,y.channel_id,y.scopes,y.refresh_token_encrypted
-      FROM youtube_short_comments c JOIN youtube_connections y ON y.disconnected_at IS NULL
-      WHERE c.state='scheduled' AND c.scheduled_at<=now() AND y.scopes @> ARRAY[$1]::text[]
-      ORDER BY c.scheduled_at,c.created_at FOR UPDATE OF c SKIP LOCKED LIMIT 1`,[COMMENT_SCOPE]);
+      FROM youtube_short_comments c LEFT JOIN youtube_connections y ON y.disconnected_at IS NULL
+      WHERE c.state='scheduled' AND c.scheduled_at<=now()
+      ORDER BY c.scheduled_at,c.created_at FOR UPDATE OF c SKIP LOCKED LIMIT 1`);
     if(!row)return null;
     await tx.query(`UPDATE youtube_short_comments SET state='publishing',lease_until=now()+interval '10 minutes',updated_at=now() WHERE id=$1`,[row.id]);
     return row;
@@ -204,4 +219,58 @@ export async function recordYouTubeShortCommentClick(db,token){
   if(!row)return null;
   await db.query('INSERT INTO youtube_short_comment_clicks(comment_id) VALUES($1)',[row.id]);
   return `https://www.youtube.com/shorts/${encodeURIComponent(row.short_video_id)}`;
+}
+
+function commentText(value){
+  const text=typeof value==='string'?value.trim():'';
+  if(!text||text.length>1200||/https?:\/\//i.test(text)) throw Error('YOUTUBE_COMMENT_TEXT_INVALID');
+  return text;
+}
+
+export async function createYouTubeCommentDraft(db,identity,{uploadId,targetKind,text,generate},verify=verifyYouTubeCommentTarget){
+  if(!['main','source'].includes(targetKind)) throw Error('INVALID_INPUT');
+  return db.transaction(async tx=>{
+    const member=await activeMember(tx,identity);
+    if(!member?.roles.includes('editor')) throw Error('FORBIDDEN');
+    await tx.query('SELECT pg_advisory_xact_lock(72036599)');
+    const {rows:[row]}=await tx.query(`SELECT u.id AS upload_id,u.episode_id,u.youtube_id AS short_video_id,
+      u.title AS short_title,p.id AS publication_id,CASE WHEN $2='source' THEN v.youtube_id ELSE p.youtube_id END AS parent_video_id,
+      y.channel_id,y.scopes,ev.content AS episode,cv.content AS claim
+      FROM youtube_short_uploads u JOIN episodes e ON e.id=u.episode_id JOIN claims c ON c.id=e.claim_id
+      JOIN videos v ON v.id=c.video_id JOIN episode_media_revisions m ON m.id=u.media_revision_id
+      JOIN episode_versions ev ON ev.episode_id=e.id AND ev.version=m.episode_version
+      JOIN claim_versions cv ON cv.claim_id=ev.claim_id AND cv.version=ev.claim_version
+      LEFT JOIN publications p ON p.episode_id=e.id AND $2='main'
+      LEFT JOIN youtube_connections y ON y.disconnected_at IS NULL
+      WHERE u.id=$1 AND u.state='published' AND u.actual_privacy_status='public'
+      ORDER BY p.published_at DESC,p.id DESC LIMIT 1`,[uuid(uploadId),targetKind]);
+    if(!row?.parent_video_id) throw Error('YOUTUBE_COMMENT_TARGET_UNVERIFIED');
+    await verify({...row,target_kind:targetKind});
+    const {rows:[existing]}=await tx.query('SELECT id FROM youtube_short_comments WHERE parent_video_id=$1 AND short_video_id=$2',
+      [row.parent_video_id,row.short_video_id]);
+    if(existing) return existing;
+    if(generate){
+      const {rows:[budget]}=await tx.query(`SELECT
+        (SELECT COALESCE(sum(reserved_micros),0) FROM episode_grok_reviews WHERE created_at>=date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')+
+        (SELECT COALESCE(sum(reserved_micros),0) FROM youtube_short_comments WHERE created_at>=date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS used`);
+      if(Number(budget.used)+RESERVE_MICROS>MONTHLY_CAP_MICROS) throw Error('BUDGET_EXHAUSTED');
+    }
+    const input={parentVideoId:row.parent_video_id,parentTitle:row.episode?.title??'',shortVideoId:row.short_video_id,
+      shortTitle:row.short_title,script:row.episode?.script??'',claim:row.claim,targetKind};
+    const {rows:[draft]}=await tx.query(`INSERT INTO youtube_short_comments(episode_id,publication_id,upload_id,parent_video_id,
+      short_video_id,target_kind,tracking_token,batch_request_id,input_snapshot,reserved_micros,state,draft_text)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::text::jsonb,$10,$11,$12) RETURNING id`,
+      [row.episode_id,row.publication_id,row.upload_id,row.parent_video_id,row.short_video_id,targetKind,
+        randomBytes(24).toString('base64url'),randomUUID(),json(input),generate?RESERVE_MICROS:0,
+        generate?'queued':'succeeded',generate?null:commentText(text)]);
+    return draft;
+  });
+}
+
+export async function completeYouTubeCommentDirect(db,id,result){
+  let text=null,error=result.error??null;
+  if(!error) try{text=commentText(JSON.parse(result.text).comment);}catch{error='GROK_COMMENT_RESULT_INVALID';}
+  // A failed draft can still be edited manually. Keep its reservation when a request may have been billed.
+  await db.query(`UPDATE youtube_short_comments SET state='succeeded',draft_text=$2,error_code=$3,
+    completed_at=now(),updated_at=now() WHERE id=$1 AND state='submitting'`,[id,text,error]);
 }
