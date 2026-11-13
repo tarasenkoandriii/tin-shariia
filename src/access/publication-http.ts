@@ -4,6 +4,7 @@ import { clerkId } from './session';
 
 export const privateHeaders = { 'Cache-Control':'private, no-store', 'X-Content-Type-Options':'nosniff' };
 const statuses: Record<string,number> = {
+  YOUTUBE_MANUAL_CHANNEL_MISMATCH:422,
   AUTH_REQUIRED:401, FORBIDDEN:403, ORIGIN_DENIED:403, SELF_APPROVAL:403, NOT_FOUND:404,
   APPROVAL_REQUIRED:409, CLAIM_STALE:409, PUBLICATION_CONFLICT:409, EPISODE_PUBLISHED:409,
   RELEASE_APPROVAL_REQUIRED:409, AUDIT_REQUIRED:409, FINDINGS_OPEN:409, REVIEW_CLOSED:409,

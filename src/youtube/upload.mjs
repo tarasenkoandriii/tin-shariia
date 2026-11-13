@@ -1,3 +1,4 @@
+import {parseYouTubeUrl} from '../editorial/youtube-url.mjs';
 import { decryptYouTubeSecret, encryptYouTubeSecret, refreshYouTubeAccessToken, youtubeOAuthConfig } from './oauth.mjs';
 import { loadYouTubeUploadInternal, patchYouTubeUpload, claimYouTubeUpload, releaseYouTubeUploadLease } from '../db/youtube-uploads.mjs';
 import { montageUrl } from '../media/montage-storage.mjs';
@@ -36,6 +37,22 @@ export function youtubeProcessingOutcome(video,expectedPrivacy,expectedSynthetic
 async function accessToken(row){
   const config=youtubeOAuthConfig();
   return refreshYouTubeAccessToken(decryptYouTubeSecret(row.refresh_token_encrypted),config);
+}
+
+export async function verifyManualYouTubeShort(connection,input){
+  const parsed=parseYouTubeUrl(input.url);
+  if(!parsed) throw Error('INVALID_INPUT');
+  if(!connection) throw Error('YOUTUBE_CHANNEL_NOT_CONNECTED');
+  const token=await accessToken(connection);
+  const url=new URL('https://www.googleapis.com/youtube/v3/videos');
+  url.search=new URLSearchParams({part:'snippet,status',id:parsed.youtubeId});
+  const response=await fetch(url,{headers:{Authorization:`Bearer ${token}`},cache:'no-store',signal:AbortSignal.timeout(10000)});
+  if(!response.ok) throw Error('YOUTUBE_STATUS_UNAVAILABLE');
+  const video=(await response.json()).items?.find(item=>item.id===parsed.youtubeId);
+  if(video?.snippet?.channelId!==connection.channel_id) throw Error('YOUTUBE_MANUAL_CHANNEL_MISMATCH');
+  const outcome=youtubeProcessingOutcome(video,input.privacyStatus);
+  if(outcome.state!=='published') throw Error(outcome.errorCode??'YOUTUBE_STATUS_UNAVAILABLE');
+  return {id:video.id,connectionId:connection.id,title:video.snippet.title,description:video.snippet.description??''};
 }
 
 async function startSession(db,row,token){

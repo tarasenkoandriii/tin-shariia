@@ -1,8 +1,9 @@
+import {verifyManualYouTubeShort} from '../../../../../../../youtube/upload.mjs';
 import {after} from 'next/server';
 import {start} from 'workflow/api';
 import {publicationError,publicationIdentity,publicationInput,publicationReply} from '../../../../../../../access/publication-http';
 import {database} from '../../../../../../../db/runtime.mjs';
-import {createYouTubeShortUpload,loadYouTubeUploadForShort} from '../../../../../../../db/youtube-uploads.mjs';
+import {createYouTubeShortUpload,getYouTubeConnectionSecret,loadYouTubeUploadForShort} from '../../../../../../../db/youtube-uploads.mjs';
 import {uploadYouTubeShort} from '../../../../../../../workflows/youtube-upload';
 import {youtubeOAuthConfig} from '../../../../../../../youtube/oauth.mjs';
 
@@ -30,7 +31,11 @@ export async function POST(request:Request,{params}:Context){
     youtubeOAuthConfig();
     if(!process.env.YOUTUBE_TOKEN_ENCRYPTION_KEY) throw Error('YOUTUBE_TOKEN_ENCRYPTION_NOT_CONFIGURED');
     const {episodeId,shortId}=await params;
-    const row=await createYouTubeShortUpload(await database(),identity,episodeId,shortId,await publicationInput(request));
+    const db=await database(),input=await publicationInput(request);
+    const verified=input.action==='register-manual'
+      ?await verifyManualYouTubeShort(await getYouTubeConnectionSecret(db,identity),input):null;
+    const row=await createYouTubeShortUpload(db,identity,episodeId,shortId,
+      verified?{...input,title:verified.title,description:verified.description}:input,verified);
     if(['queued','uploading','processing','unknown'].includes(row.state)) after(async()=>{try{await dispatch(row.id);}catch{/* Workflow can be restarted on the next status read. */}});
     return publicationReply({id:row.id,state:row.state,title:row.title,privacyStatus:row.privacy_status,aiDisclosed:true},202);
   }catch(error){return publicationError(error);}

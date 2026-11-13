@@ -69,7 +69,8 @@ export async function disconnectYouTube(db,identity){
   });
 }
 
-export async function createYouTubeShortUpload(db,identity,episodeId,shortId,input){
+/** @param {{id:string,connectionId:string}|null} verified */
+export async function createYouTubeShortUpload(db,identity,episodeId,shortId,input,verified=null){
   episodeId=uuid(episodeId);shortId=uuid(shortId);
   return db.transaction(async tx=>{
     const member=await publisher(tx,identity);
@@ -79,7 +80,8 @@ export async function createYouTubeShortUpload(db,identity,episodeId,shortId,inp
     const description=typeof input.description==='string'?input.description.trim():'';
     if(!title||title.length>100||description.length>5000) throw Error('INVALID_INPUT');
     const {rows:[connection]}=await tx.query(`SELECT id FROM youtube_connections WHERE owner_id=$1 AND disconnected_at IS NULL`,[member.id]);
-    if(!connection) throw Error('YOUTUBE_CHANNEL_NOT_CONNECTED');
+    if(!connection||verified&&verified.connectionId!==connection.id) throw Error('YOUTUBE_CHANNEL_NOT_CONNECTED');
+    if(verified) await tx.query('SELECT id FROM episodes WHERE id=$1 FOR UPDATE',[episodeId]);
     const {rows:[release]}=await tx.query(`SELECT s.id,s.episode_id,s.manifest,m.id AS media_revision_id,m.pathname,
       m.expected_bytes,m.sha256,m.expires_at,e.version AS current_version,e.status AS episode_status,
       c.status AS claim_status,c.version AS current_claim_version,
@@ -97,19 +99,26 @@ export async function createYouTubeShortUpload(db,identity,episodeId,shortId,inp
         AND NOT EXISTS(SELECT 1 FROM audit_findings f LEFT JOIN audit_finding_reviews r USING(job_id,attempt,position)
           WHERE f.job_id=a.job_id AND f.attempt=a.attempt AND r.job_id IS NULL)
         AND NOT EXISTS(SELECT 1 FROM youtube_short_uploads u WHERE u.episode_id=s.episode_id
-          AND u.state='published')`,[shortId,episodeId]);
+          AND u.state='published' AND (\$3::text IS NULL OR u.youtube_id IS DISTINCT FROM \$3))`,[shortId,episodeId,verified?.id??null]);
     if(!release) throw Error('YOUTUBE_RELEASE_APPROVAL_REQUIRED');
     if(input.reviewedSha256!==release.sha256) throw Error('YOUTUBE_MEDIA_CONFIRMATION_REQUIRED');
     const existingByKey=await tx.query('SELECT * FROM youtube_short_uploads WHERE idempotency_key=$1',[input.idempotencyKey]);
     if(existingByKey.rows[0]){
+      if(existingByKey.rows[0].media_revision_id!==release.media_revision_id||
+        (verified&&existingByKey.rows[0].youtube_id!==verified.id)) throw Error('YOUTUBE_UPLOAD_EXISTS');
       if(existingByKey.rows[0].contains_synthetic_media!==true) throw Error('YOUTUBE_UPLOAD_DISCLOSURE_REQUIRED');
       return existingByKey.rows[0];
     }
-    const {rows:[existingMedia]}=await tx.query('SELECT id,created_by,state,title,privacy_status,sha256,contains_synthetic_media FROM youtube_short_uploads WHERE media_revision_id=$1',[release.media_revision_id]);
+    const {rows:[existingMedia]}=await tx.query('SELECT id,created_by,state,title,privacy_status,sha256,contains_synthetic_media,youtube_id FROM youtube_short_uploads WHERE media_revision_id=$1',[release.media_revision_id]);
     if(existingMedia){
+      if(verified&&existingMedia.youtube_id!==verified.id) throw Error('YOUTUBE_UPLOAD_EXISTS');
       if(existingMedia.created_by===member.id&&existingMedia.title===title&&existingMedia.privacy_status===input.privacyStatus
         &&existingMedia.sha256===release.sha256&&existingMedia.contains_synthetic_media===true) return existingMedia;
       throw Error('YOUTUBE_UPLOAD_EXISTS');
+    }
+    if(verified){
+      const {rows:[duplicate]}=await tx.query('SELECT id FROM youtube_short_uploads WHERE youtube_id=$1',[verified.id]);
+      if(duplicate) throw Error('YOUTUBE_UPLOAD_EXISTS');
     }
     const id=randomUUID();
     const {rows:[upload]}=await tx.query(`INSERT INTO youtube_short_uploads
@@ -118,6 +127,14 @@ export async function createYouTubeShortUpload(db,identity,episodeId,shortId,inp
       RETURNING id,state,title,privacy_status,total_bytes,sha256,contains_synthetic_media,created_at`,
     [id,episodeId,release.media_revision_id,connection.id,member.id,input.idempotencyKey,title,description,
       input.privacyStatus,release.expected_bytes,release.sha256]);
+    if(verified){
+      const {rows:[published]}=await tx.query(`UPDATE youtube_short_uploads SET state='published',youtube_id=$2,
+        upload_offset=total_bytes,processing_status='processed',actual_privacy_status=privacy_status,
+        actual_contains_synthetic_media=true WHERE id=$1 RETURNING id,state,title,privacy_status`,[upload.id,verified.id]);
+      await tx.query(`INSERT INTO youtube_upload_events(upload_id,actor_id,action,details)
+        VALUES($1,$2,'published',$3::text::jsonb)`,[upload.id,member.id,json({manual:true,youtubeId:verified.id})]);
+      return published;
+    }
     await tx.query(`INSERT INTO youtube_upload_events(upload_id,actor_id,action,details) VALUES($1,$2,'queued',$3::text::jsonb)`,
       [upload.id,member.id,json({privacyStatus:upload.privacy_status,mediaRevisionId:release.media_revision_id,sha256:release.sha256,
         containsSyntheticMedia:true})]);

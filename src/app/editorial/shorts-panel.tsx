@@ -88,11 +88,12 @@ export function ShortsPanel({episode,sources,items,plans,canCreate,canReview,can
     }catch{setMessage('Gemini не повернув перевірену пропозицію. Спробуйте пізніше або відредагуйте фрагменти вручну.');}
     finally{setSuggesting(false);}
   }
-  async function publish(event:React.FormEvent<HTMLFormElement>,item:Short){
+  async function publish(event:React.FormEvent<HTMLFormElement>,item:Short,manual=false){
     event.preventDefault();if(busy)return;
     const form=new FormData(event.currentTarget);setBusy(true);setMessage('');
     try{
       await request(`/api/episodes/${episode.id}/shorts/${item.id}/youtube-upload`,'POST',{
+        ...(manual?{action:'register-manual',url:form.get('url')}:{}),
         title:form.get('title'),description:form.get('description'),privacyStatus:form.get('privacyStatus'),
         idempotencyKey:crypto.randomUUID(),reviewedSha256:item.sha256,confirmed:form.has('confirmed'),
         aiDisclosureConfirmed:form.has('aiDisclosureConfirmed'),
@@ -103,6 +104,10 @@ export function ShortsPanel({episode,sources,items,plans,canCreate,canReview,can
       setMessage(code==='YOUTUBE_OAUTH_NOT_CONFIGURED'||code==='YOUTUBE_TOKEN_ENCRYPTION_NOT_CONFIGURED'
         ?'OAuth YouTube ще не налаштований у Production.'
         :code==='YOUTUBE_CHANNEL_NOT_CONNECTED'?'Спершу підключіть YouTube-канал у головному розділі редакції.'
+        :code==='YOUTUBE_MANUAL_CHANNEL_MISMATCH'?'Посилання не веде на відео підключеного каналу.'
+        :code==='YOUTUBE_PRIVACY_MISMATCH'?'Видимість у YouTube Studio не збігається з вибраною.'
+        :code==='YOUTUBE_AI_DISCLOSURE_MISMATCH'?'YouTube не підтвердив позначку синтетичного контенту.'
+        :code==='YOUTUBE_STATUS_UNAVAILABLE'?'Не вдалося підтвердити стан відео. Дочекайтеся обробки й повторіть.'
         :code==='YOUTUBE_RELEASE_APPROVAL_REQUIRED'?'Точний Shorts-файл ще не пройшов повний аудит і допуск редактора.'
         :'Не вдалося створити завантаження. Перевірте підключення каналу та допуск цього файлу.');
     }finally{setBusy(false);}
@@ -245,6 +250,19 @@ export function ShortsPanel({episode,sources,items,plans,canCreate,canReview,can
             <label><input type="checkbox" name="aiDisclosureConfirmed" required /> Підтверджую, що це AI-створений матеріал і YouTube має показати відповідну позначку.</label>
             <label><input type="checkbox" name="confirmed" required /> Підтверджую цей файл, текст і вибрану видимість.</label>
             <button disabled={busy}>{busy?'Передаємо завдання…':'Підтвердити й завантажити'}</button>
+          </form>
+        </details>}
+        {canPublish&&item.audit_media_revision_id&&item.sha256&&!item.youtube_upload_id&&<details>
+          <summary>Зареєструвати Shorts, завантажений через YouTube Studio</summary>
+          <p><a href={`${base}/${item.id}/download`} target="_blank" rel="noreferrer">Відкрити допущений MP4</a></p>
+          <form onSubmit={event=>void publish(event,item,true)}>
+            <label>Посилання YouTube <input name="url" type="url" required /></label>
+            <label>Видимість <select name="privacyStatus" defaultValue="private">
+              <option value="private">Приватне</option><option value="unlisted">За посиланням</option><option value="public">Публічне</option>
+            </select></label>
+            <label><input type="checkbox" name="confirmed" required /> Підтверджую, що завантажив саме файл із SHA-256 <code>{item.sha256}</code>.</label>
+            <label><input type="checkbox" name="aiDisclosureConfirmed" required /> Підтверджую, що увімкнув позначку синтетичного контенту в YouTube Studio.</label>
+            <button disabled={busy}>Перевірити й зареєструвати посилання</button>
           </form>
         </details>}
       </>}
