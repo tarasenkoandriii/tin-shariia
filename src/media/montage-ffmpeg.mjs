@@ -100,8 +100,9 @@ export function ffmpegMontage(env=process.env){
       const url=shortsOutput(job,origin);
       const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(60000)});
       if(!response.ok) throw Error('SHORTS_RENDER_UNAVAILABLE');
-      const length=Number(response.headers.get('content-length'));
-      if(Number.isFinite(length)&&length>128*1024*1024) throw Error('SHORTS_RENDER_INVALID');
+      const contentLength=response.headers.get('content-length');
+      const length=contentLength===null?null:Number(contentLength);
+      if(length!==null&&Number.isFinite(length)&&length>128*1024*1024) throw Error('SHORTS_RENDER_INVALID');
       const reader=response.body?.getReader();
       if(!reader) throw Error('SHORTS_RENDER_INVALID');
       const chunks=[];let size=0;
@@ -113,7 +114,7 @@ export function ffmpegMontage(env=process.env){
           chunks.push(value);
         }
       }finally{reader.releaseLock();}
-      if(size<16||(Number.isFinite(length)&&length!==size)) throw Error('SHORTS_RENDER_INVALID');
+      if(size<16||(length!==null&&Number.isFinite(length)&&length!==size)) throw Error('SHORTS_RENDER_INVALID');
       return Buffer.concat(chunks,size);
     },
     async report(job){
