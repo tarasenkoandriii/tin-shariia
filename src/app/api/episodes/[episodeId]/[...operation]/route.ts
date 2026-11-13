@@ -11,7 +11,7 @@ import { confirmMontage, initMontage, ownedMontage, readMontage } from '../../..
 import { packageZip } from '../../../../../editorial/publication-zip.mjs';
 import { montageEnabled, montageHead, montageUrl } from '../../../../../media/montage-storage.mjs';
 import { dispatchMontages } from '../../../../../workflows/montage-dispatch';
-import { failTikTokPublication, getShortRender, initShortRender, prepareTikTokPublication, registerTikTokPublication } from '../../../../../db/shorts.mjs';
+import { failTikTokPublication, getShortRender, initShortRender, prepareTikTokPublication, readTikTokPackageMedia, registerTikTokPublication } from '../../../../../db/shorts.mjs';
 import { startShortRender } from '../../../../../media/shorts-queue.mjs';
 import { renderShort } from '../../../../../workflows/shorts-render';
 import { start } from 'workflow/api';
@@ -55,6 +55,17 @@ export async function GET(_request:Request,{params}:Context){
       });
       return publicationReply({id:row.id,state:row.state,manifest:row.manifest,sha256:row.sha256,
         downloadUrl:row.state==='ready'?`/api/episodes/${episodeId}/shorts/${row.id}/download`:null,errorCode:row.error_code});
+    }
+    if (operation.length === 3 && operation[0] === 'shorts' && operation[2] === 'tiktok-download') {
+      const identity = await publicationIdentity();
+      const media = await readTikTokPackageMedia(await database(), identity, episodeId, operation[1]);
+      const file = await fetch(await montageUrl(media, 'get'), {cache: 'no-store', signal: _request.signal});
+      if (!file.ok || !file.body) throw Error('NOT_FOUND');
+      return new Response(file.body, {headers: {
+        ...privateHeaders,
+        'Content-Type': 'video/mp4',
+        'Content-Disposition': `attachment; filename="tiktok-${media.id}.mp4"`,
+      }});
     }
     if(isShortDownload(operation)){
       const identity=await publicationIdentity();

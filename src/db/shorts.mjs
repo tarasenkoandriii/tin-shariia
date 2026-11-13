@@ -151,8 +151,8 @@ async function publisherFor(db,identity){
   return member;
 }
 
-const tiktokReleaseSql=`SELECT s.id,s.episode_id,s.episode_version,s.manifest,s.sha256,m.id AS media_revision_id,
-    m.sha256 AS media_sha256,m.snapshot,e.version AS current_version,e.status AS episode_status,
+const tiktokReleaseSql=`SELECT s.id,s.episode_id,s.episode_version,s.manifest,s.sha256,s.pathname,LEAST(s.expires_at,m.expires_at) AS expires_at,m.id AS media_revision_id,
+    m.sha256 AS media_sha256,m.pathname AS media_pathname,m.snapshot,e.version AS current_version,e.status AS episode_status,
     c.status AS claim_status,c.version AS current_claim_version,a.reviewed_at
     FROM shorts_renders s JOIN episode_media_revisions m ON m.id=s.audit_media_revision_id
     JOIN episodes e ON e.id=s.episode_id JOIN claims c ON c.id=e.claim_id
@@ -161,19 +161,42 @@ const tiktokReleaseSql=`SELECT s.id,s.episode_id,s.episode_version,s.manifest,s.
       WHERE j.media_revision_id=m.id AND j.mode='video' AND j.status='succeeded'
       ORDER BY x.completed_at DESC,j.created_at DESC,j.id DESC LIMIT 1) a ON true
     WHERE s.id=$1 AND s.episode_id=$2 AND s.state='ready' AND m.kind='short' AND m.state='passed'
-      AND m.sha256 IS NOT NULL AND m.expected_bytes>0 AND m.expires_at>now()
+      AND s.sha256=m.sha256 AND s.pathname=m.pathname AND m.expected_bytes>0 AND m.expires_at>now() AND s.expires_at>now()
       AND e.status='approved' AND e.version=s.episode_version AND c.status='approved'
       AND m.snapshot->>'claimVersion'=c.version::text AND a.reviewed_at IS NOT NULL
       AND NOT EXISTS(SELECT 1 FROM audit_findings f LEFT JOIN audit_finding_reviews r USING(job_id,attempt,position)
         WHERE f.job_id=a.job_id AND f.attempt=a.attempt AND r.job_id IS NULL)
     FOR SHARE OF s,m,e,c`;
 
+export async function readTikTokPackageMedia(db, identity, episodeId, shortId) {
+  episodeId = uuid(episodeId);
+  shortId = uuid(shortId);
+  return db.transaction(async tx => {
+    await publisherFor(tx, identity);
+    const {rows: [release]} = await tx.query(tiktokReleaseSql, [shortId, episodeId]);
+    if (!release?.pathname || release.pathname !== release.media_pathname) throw Error('NOT_FOUND');
+
+    const {rows: [publication]} = await tx.query(`SELECT sha256, media_revision_id
+      FROM tiktok_short_publications
+      WHERE short_id=$1 AND episode_id=$2 AND state='ready_to_publish'
+      FOR SHARE`, [shortId, episodeId]);
+    if (!publication || publication.sha256 !== release.sha256 ||
+        publication.sha256 !== release.media_sha256 ||
+        publication.media_revision_id !== release.media_revision_id) {
+      throw Error('NOT_FOUND');
+    }
+    return {pathname: release.pathname, expires_at: release.expires_at, id: shortId};
+  });
+}
+
 export async function prepareTikTokPublication(db,identity,episodeId,shortId,input){
   episodeId=uuid(episodeId);shortId=uuid(shortId);
   if(input.confirmed!==true||input.aiDisclosureConfirmed!==true||typeof input.reviewedSha256!=='string'||!/^([a-f0-9]{64})$/.test(input.reviewedSha256))throw Error('TIKTOK_CONFIRMATION_REQUIRED');
   return db.transaction(async tx=>{
     const member=await publisherFor(tx,identity);
-    const {rows:[release]}=await tx.query(tiktokReleaseSql,[shortId,episodeId]);
+    // Serialize the first package creation even when no publication row exists yet.
+    const prepareReleaseSql = tiktokReleaseSql.replace('FOR SHARE OF s,m,e,c', 'FOR UPDATE OF s FOR SHARE OF m,e,c');
+    const {rows:[release]}=await tx.query(prepareReleaseSql,[shortId,episodeId]);
     if(!release)throw Error('TIKTOK_RELEASE_APPROVAL_REQUIRED');
     if(input.reviewedSha256!==release.sha256)throw Error('TIKTOK_MEDIA_CONFIRMATION_REQUIRED');
     const {rows:[existing]}=await tx.query('SELECT * FROM tiktok_short_publications WHERE short_id=$1 FOR UPDATE',[shortId]);
@@ -219,6 +242,11 @@ export async function registerTikTokPublication(db,identity,episodeId,shortId,in
     await tx.query(`INSERT INTO tiktok_short_publication_events(publication_id,actor_id,action,details)
       VALUES($1,$2,'published',$3::text::jsonb)`,[row.id,member.id,json({url,publishedAt,sha256:row.sha256,aiDisclosed:true})]);
     return {...updated,deduplicated:false};
+  }).catch(error=>{
+    if(error?.code==='23505'&&(error.constraint_name??error.constraint)==='tiktok_short_publications_url'){
+      throw Error('TIKTOK_PUBLICATION_CONFLICT');
+    }
+    throw error;
   });
 }
 

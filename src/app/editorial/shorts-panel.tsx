@@ -21,6 +21,16 @@ export type MontagePlanOption={id:string;name:string;version:number;spec:Record<
 const labels:Record<string,string>={queued:'У черзі',rendering:'Збирається FFmpeg',technical_check:'FFmpeg перевіряє готовий файл',ready:'Чернетка пройшла технічну перевірку',failed:'Помилка складання або технічної перевірки',expired:'Термін зберігання минув'};
 const seconds=(milliseconds:number)=>(milliseconds/1000).toFixed(3).replace(/0+$/,'').replace(/\.$/,'');
 
+function downloadTikTokCaption(shortId: string, publication: TikTokPublication) {
+  const caption = [publication.title, publication.description].filter(Boolean).join('\n\n');
+  const url = URL.createObjectURL(new Blob([caption + '\n'], {type: 'text/plain;charset=utf-8'}));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `tiktok-${shortId}-caption.txt`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 async function request<T>(url:string,method='GET',body?:object):Promise<T>{
   const response=await fetch(url,{method,...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
   const json=await response.json();
@@ -115,6 +125,7 @@ export function ShortsPanel({episode,sources,items,plans,canCreate,canReview,can
       setMessage(code==='TIKTOK_RELEASE_APPROVAL_REQUIRED'?'Цей точний MP4 ще не пройшов повний аудит і редакторський допуск.'
         :code==='TIKTOK_MEDIA_CONFIRMATION_REQUIRED'?'Файл змінився після підготовки. Звірте SHA-256 і створіть пакет повторно.'
         :code==='TIKTOK_INVALID_URL'?'Вставте повне публічне посилання TikTok на відео, наприклад https://www.tiktok.com/@handle/video/1234567890123456789.'
+        :code==='TIKTOK_PUBLICATION_CONFLICT'?'Це посилання вже зареєстроване або цей Shorts має іншу зареєстровану публікацію. Звірте посилання і час.'
         :code==='TIKTOK_PACKAGE_REQUIRED'?'Спершу підготуйте пакет ручної публікації.'
         :code==='TIKTOK_DISCLOSURE_REQUIRED'?'Підтвердьте, що позначку AI-контенту ввімкнено у TikTok.'
         :'Не вдалося зберегти стан TikTok. Перевірте дані та права видавця.');
@@ -174,6 +185,8 @@ export function ShortsPanel({episode,sources,items,plans,canCreate,canReview,can
           {canPublish&&(!item.tiktok_publication||item.tiktok_publication.state==='failed')&&item.sha256&&item.audit_media_revision_id&&<details>
             <summary>{item.tiktok_publication?'Підготувати повторне завантаження':'Підготувати ручну публікацію'}</summary>
             <p>Підготовка фіксує точний допущений файл, заголовок та опис. Вона нічого не завантажує й не публікує.</p>
+            <p>Заголовок для TikTok: <strong>{item.manifest.title}</strong></p>
+            {item.manifest.description&&<p style={{whiteSpace:'pre-wrap'}}>{item.manifest.description}</p>}
             <p>SHA-256: <code>{item.sha256}</code></p>
             <form onSubmit={event=>void tiktokAction(event,item,'prepare')}>
               <label><input type="checkbox" name="aiDisclosureConfirmed" required /> Підтверджую: цей ролик створено за допомогою ШІ, і під час ручного завантаження я ввімкну відповідну позначку TikTok.</label>
@@ -186,7 +199,10 @@ export function ShortsPanel({episode,sources,items,plans,canCreate,canReview,can
             <p>Звірений SHA-256: <code>{item.tiktok_publication.sha256}</code></p>
             <p>Заголовок для TikTok: <strong>{item.tiktok_publication.title}</strong></p>
             {item.tiktok_publication.description&&<p>Опис для TikTok: {item.tiktok_publication.description}</p>}
-            <p><a href={`${base}/${item.id}/download`} target="_blank" rel="noreferrer">Завантажити цей приватний MP4</a></p>
+            <p><a href={`${base}/${item.id}/tiktok-download`}>Завантажити MP4 з пакета TikTok</a></p>
+            <p><button type="button" onClick={()=>{
+              if(item.tiktok_publication) downloadTikTokCaption(item.id,item.tiktok_publication);
+            }}>Завантажити підпис для TikTok (.txt)</button></p>
             <form onSubmit={event=>void tiktokAction(event,item,'register')}>
               <label>Публічне посилання TikTok <input name="url" type="url" required placeholder="https://www.tiktok.com/@handle/video/…" /></label>
               <label>Час публікації (місцевий час) <input name="publishedAt" type="datetime-local" required /></label>

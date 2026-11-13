@@ -13,7 +13,7 @@ import {videoAuditStatus} from '../src/analysis/video-status.mjs';
 import {reviewVideoAudit} from '../src/db/video-audit.mjs';
 import {registerPublication} from '../src/db/publications.mjs';
 import {montageStep} from '../src/media/montage-queue.mjs';
-import {createShortAuditMedia,initShortRender,listShortRenders} from '../src/db/shorts.mjs';
+import {createShortAuditMedia,initShortRender,listShortRenders,prepareTikTokPublication,readTikTokPackageMedia,updateShortRender,failTikTokPublication,registerTikTokPublication} from '../src/db/shorts.mjs';
 
 const sha256='a'.repeat(64),ffmpegId='1a0b32d8-9cd7-4f01-bff4-68a767c1e77a';
 const audioReport='frame:0 pts:0 pts_time:0.1\nlavfi.r128.I=-21.4\nlavfi.r128.true_peak=0.100\n'
@@ -126,6 +126,46 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
     for(let step=0;step<3;step++) await processAnalysisStep(db,shortAuditJob.id,1,shortProvider);
     assert.equal((await videoAuditStatus(db,'media-review',episode.id,auditMediaId))[0].status,'succeeded');
     assert.equal(shortProviderCalls,1);
+    await updateShortRender(db, short.id, renderToken, {state:'ready', auditMediaRevisionId:auditMediaId});
+    const downloadTikTok = (identity = 'media-publisher') => readTikTokPackageMedia(db, identity, episode.id, short.id);
+    await assert.rejects(downloadTikTok(), /NOT_FOUND/);
+    await reviewVideoAudit(db, 'media-review', episode.id, auditMediaId, {action:'approve'});
+    const prepareTikTok = () => prepareTikTokPublication(db, 'media-publisher', episode.id, short.id, {
+      confirmed:true, aiDisclosureConfirmed:true, reviewedSha256:sha256,
+    });
+    const [tiktok, repeatedPackage] = await Promise.all([prepareTikTok(), prepareTikTok()]);
+    assert.equal(tiktok.id, repeatedPackage.id);
+    assert.deepEqual([tiktok.deduplicated, repeatedPackage.deduplicated].sort(), [false, true]);
+    assert.equal((await downloadTikTok()).pathname, `shorts/${episode.id}/${short.id}.mp4`);
+    await assert.rejects(downloadTikTok('media-author'), /FORBIDDEN/);
+    await db.query('UPDATE tiktok_short_publications SET sha256=$2 WHERE id=$1', [tiktok.id, 'b'.repeat(64)]);
+    await assert.rejects(downloadTikTok(), /NOT_FOUND/);
+    await db.query('UPDATE tiktok_short_publications SET sha256=$2 WHERE id=$1', [tiktok.id, sha256]);
+    await db.query('UPDATE shorts_renders SET pathname=$2 WHERE id=$1', [short.id, 'shorts/changed.mp4']);
+    await assert.rejects(downloadTikTok(), /NOT_FOUND/);
+    await db.query('UPDATE shorts_renders SET pathname=$2 WHERE id=$1', [short.id, `shorts/${episode.id}/${short.id}.mp4`]);
+    await failTikTokPublication(db, 'media-publisher', episode.id, short.id, {
+      note:'Manual upload failed', confirmed:true,
+    });
+    await assert.rejects(downloadTikTok(), /NOT_FOUND/);
+    assert.equal((await prepareTikTok()).id, tiktok.id);
+    const tiktokInput = {
+      url:'https://www.tiktok.com/@editorial/video/1234567890123456789',
+      publishedAt:new Date().toISOString(), confirmed:true, aiDisclosureConfirmed:true, reviewedSha256:sha256,
+    };
+    const registerTikTok = (input = tiktokInput) =>
+      registerTikTokPublication(db, 'media-publisher', episode.id, short.id, input);
+    await assert.rejects(registerTikTok({...tiktokInput, aiDisclosureConfirmed:false}), /TIKTOK_DISCLOSURE_REQUIRED/);
+    assert.equal((await registerTikTok()).state, 'published');
+    assert.equal((await registerTikTok()).deduplicated, true);
+    await assert.rejects(registerTikTok({...tiktokInput, url:tiktokInput.url + '0'}), /TIKTOK_PUBLICATION_CONFLICT/);
+    await assert.rejects(downloadTikTok(), /NOT_FOUND/);
+    const {rows: publicationEvents} = await db.query(
+      'SELECT action FROM tiktok_short_publication_events WHERE publication_id=$1 ORDER BY id', [tiktok.id],
+    );
+    assert.deepEqual(publicationEvents.map(event => event.action), ['prepared','failed','retry_prepared','published']);
+
+
     await db.query("UPDATE episode_media_revisions SET report=jsonb_set(report,'{durationMs}','2000'::jsonb) WHERE id=$1",[row.id]);
     const config={model:'gemini-test',inputRate:2,outputRate:10,monthlyMicros:1000000};
     const run=(identity,input={},limits=config)=>enqueueVideoAudit(db,identity,episode.id,row.id,input,limits);
