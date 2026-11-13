@@ -155,6 +155,13 @@
       "when": 1794557000000,
       "tag": "0021_video_editing_quality",
       "breakpoints": false
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794558000000,
+      "tag": "0022_grok_acceptance_threshold",
+      "breakpoints": false
     }
   ]
 }

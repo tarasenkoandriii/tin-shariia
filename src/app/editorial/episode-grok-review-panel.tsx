@@ -34,7 +34,7 @@ export function EpisodeGrokReviewPanel({episode,reviews,canRun,canAccept}:{episo
     <p>Grok порівнює сценарій із джерелами та результатами попередніх публікацій каналу, оцінює новизну й інтерес, пропонує конкретні правки. Він не переписує сценарій сам: автор вносить зміни, проходить погодження нової версії та за потреби запускає наступний прохід.</p>
     {latest&&<article>
       <strong>Версія {latest.episode_version} · прохід {latest.round}: {labels[latest.state]??latest.state}</strong>
-      {latest.auto_accepted&&<p>Автоприйняття: обидві оцінки не нижчі за {latest.auto_accept_threshold}/100, фактичних ризиків Grok не виявив.</p>}
+      {latest.auto_accepted&&<p>Автоприйняття: поріг на момент оцінки — {latest.auto_accept_threshold}/100, фактичних ризиків Grok не виявив.</p>}
       {latest.error_code&&<p>Код: {latest.error_code}</p>}
       {latest.result&&<>
         <p>Оцінка редакційної новизни: {latest.result.originalityScore}/100 · інтересу: {latest.result.interestScore}/100</p>

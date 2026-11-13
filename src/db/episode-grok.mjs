@@ -85,7 +85,7 @@ export async function readGrokSettings(db,identity){
   const member=await activeMember(db,identity);
   if(!member?.roles.includes('admin'))throw Error('FORBIDDEN');
   const {rows:[row]}=await db.query('SELECT auto_accept_score,grok_mode FROM editorial_ai_settings WHERE id=1');
-  return {autoAcceptScore:row?.auto_accept_score??80,grokMode:row?.grok_mode==='batch'?'batch':'direct'};
+  return {autoAcceptScore:row?.auto_accept_score??75,grokMode:row?.grok_mode==='batch'?'batch':'direct'};
 }
 
 export async function readGrokAutoAcceptScore(db,identity){
@@ -168,8 +168,8 @@ async function storeGrokReviewResult(db,id,text,fromState){
     return 'failed';
   }
   const {rows:[settings]}=await db.query('SELECT auto_accept_score FROM editorial_ai_settings WHERE id=1');
-  const threshold=Number(settings?.auto_accept_score??80);
-  const autoAccepted=result.originalityScore>=threshold&&result.interestScore>=threshold&&result.factRisks.length===0;
+  const threshold=Number(settings?.auto_accept_score??75);
+  const autoAccepted=Math.max(result.originalityScore,result.interestScore)>threshold&&result.factRisks.length===0;
   await db.query(`UPDATE episode_grok_reviews SET state=$2,result=$3::text::jsonb,error_code=NULL,completed_at=now(),updated_at=now(),
     auto_accepted=$4::boolean,auto_accept_threshold=CASE WHEN $4::boolean THEN $5::smallint ELSE NULL END,
     accepted_at=CASE WHEN $4::boolean THEN now() ELSE NULL END WHERE id=$1 AND state=$6`,[id,autoAccepted?'accepted':'succeeded',json(result),autoAccepted,threshold,fromState]);
