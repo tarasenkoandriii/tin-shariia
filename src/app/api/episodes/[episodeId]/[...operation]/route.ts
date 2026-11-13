@@ -1,4 +1,5 @@
 import {after} from 'next/server';
+import { mutate } from '../../../../../access/editorial-http';
 import { analysisConfig } from '../../../../../analysis/config.mjs';
 import { enqueueVideoAudit } from '../../../../../analysis/queue.mjs';
 import { videoAuditStatus } from '../../../../../analysis/video-status.mjs';
@@ -88,6 +89,12 @@ export async function GET(_request:Request,{params}:Context){
 }
 
 export async function POST(request:Request,{params}:Context){
+  // This route is more specific than /api/[collection]/[[...id]], so it must forward the shared
+  // editorial review transition; otherwise approving an episode answered 404 NOT_FOUND.
+  {
+    const {episodeId,operation}=await params;
+    if(operation.length===1&&operation[0]==='reviews') return mutate(request,'episodes',episodeId,true);
+  }
   try{
     const {episodeId,operation}=await params;
     if(operation.length===3&&operation[0]==='shorts'&&operation[2]==='tiktok-publication'){
