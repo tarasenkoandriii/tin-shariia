@@ -11,12 +11,14 @@ import { confirmMontage, initMontage, ownedMontage, readMontage } from '../../..
 import { packageZip } from '../../../../../editorial/publication-zip.mjs';
 import { montageEnabled, montageHead, montageUrl } from '../../../../../media/montage-storage.mjs';
 import { dispatchMontages } from '../../../../../workflows/montage-dispatch';
-import { getShortRender, initShortRender } from '../../../../../db/shorts.mjs';
+import { failTikTokPublication, getShortRender, initShortRender, prepareTikTokPublication, registerTikTokPublication } from '../../../../../db/shorts.mjs';
 import { startShortRender } from '../../../../../media/shorts-queue.mjs';
 import { renderShort } from '../../../../../workflows/shorts-render';
 import { start } from 'workflow/api';
 import { reserveShortsProposal, settleShortsProposal } from '../../../../../db/shorts.mjs';
 import { suggestShorts } from '../../../../../analysis/shorts-proposal.mjs';
+import {queueEpisodeGrokReview,listEpisodeGrokReviews,acceptEpisodeGrokReview} from '../../../../../db/episode-grok.mjs';
+import {grokBatchConfigured} from '../../../../../analysis/grok-batch.mjs';
 
 type Context={params:Promise<{episodeId:string;operation:string[]}>};
 const isDownload=(operation:string[])=>operation.length===3&&operation[0]==='montages'&&operation[2]==='download';
@@ -31,6 +33,10 @@ async function dispatchShort(db:Awaited<ReturnType<typeof database>>,id:string){
 export async function GET(_request:Request,{params}:Context){
   try{
     const {episodeId,operation}=await params;
+    if(operation.length===1&&operation[0]==='grok-review'){
+      const identity=await publicationIdentity();
+      return publicationReply(await listEpisodeGrokReviews(await database(),identity,episodeId));
+    }
     if(isAudit(operation)){
       const identity=await publicationIdentity();
       return publicationReply(await videoAuditStatus(await database(),identity,episodeId,operation[1]));
@@ -72,6 +78,23 @@ export async function GET(_request:Request,{params}:Context){
 export async function POST(request:Request,{params}:Context){
   try{
     const {episodeId,operation}=await params;
+    if(operation.length===3&&operation[0]==='shorts'&&operation[2]==='tiktok-publication'){
+      const identity=await publicationIdentity(request),input=await publicationInput(request),db=await database();
+      if(input.action==='prepare')return publicationReply(await prepareTikTokPublication(db,identity,episodeId,operation[1],input),201);
+      if(input.action==='register')return publicationReply(await registerTikTokPublication(db,identity,episodeId,operation[1],input));
+      if(input.action==='fail')return publicationReply(await failTikTokPublication(db,identity,episodeId,operation[1],input));
+      throw Error('INVALID_INPUT');
+    }
+    if(operation.length===1&&operation[0]==='grok-review'){
+      const identity=await publicationIdentity(request);
+      const input=await publicationInput(request),db=await database();
+      if(input.action==='accept')return publicationReply(await acceptEpisodeGrokReview(db,identity,episodeId,input.reviewId,input.version));
+      if(input.action==='run'){
+        if(!grokBatchConfigured())throw Error('GROK_NOT_CONFIGURED');
+        return publicationReply(await queueEpisodeGrokReview(db,identity,episodeId),202);
+      }
+      throw Error('INVALID_INPUT');
+    }
     if(operation.length===1&&operation[0]==='shorts'){
       const identity=await publicationIdentity(request);
       const db=await database();

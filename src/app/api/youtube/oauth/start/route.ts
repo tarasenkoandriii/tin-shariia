@@ -7,13 +7,14 @@ import { createYouTubeAuthorization, youtubeOAuthConfig } from '../../../../../y
 
 export const dynamic='force-dynamic';
 
-export async function GET(){
+export async function GET(request:Request){
   try{
     const identity=await clerkId();
     if(!identity) return NextResponse.redirect(new URL('/sign-in',appOrigin()));
     const origin=appOrigin();
     const config=youtubeOAuthConfig({...process.env,APP_ORIGIN:origin});
-    const flow=createYouTubeAuthorization({memberId:identity,origin,clientId:config.clientId});
+    const requestCommentScope=new URL(request.url).searchParams.get('comments')==='1';
+    const flow=createYouTubeAuthorization({memberId:identity,origin,clientId:config.clientId,includeCommentScope:requestCommentScope});
     await createOAuthState(await database(),identity,flow);
     return NextResponse.redirect(flow.authorizationUrl,302);
   }catch(error){

@@ -19,6 +19,7 @@ export function YouTubeConnectionPanel({connection,result,configured}:{connectio
     finally{setBusy(false);}
   }
   const resultText:Record<string,string>={connected:'YouTube-канал підключено.',connect_failed:'Не вдалося підключити YouTube. Перевірте згоду й налаштування OAuth.',
+    comment_scope_required:'Google не надав дозвіл на коментарі. Перевірте конфігурацію OAuth і повторіть підключення.',
     not_configured:'OAuth-ключі YouTube ще не налаштовані.',forbidden:'Підключати канал може лише учасник із роллю публікатора.'};
   return <section>
     <h2>YouTube Studio</h2>

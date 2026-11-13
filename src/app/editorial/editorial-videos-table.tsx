@@ -35,31 +35,42 @@ export function EditorialVideosTable({ videos }: { videos: Video[] }) {
   const [sort, setSort] = useState<{ key: SortKey; direction: 'ascending' | 'descending' }>({
     key: 'createdAt', direction: 'descending',
   });
-  const sorted = [...videos].sort((a, b) => {
+  const [query, setQuery] = useState('');
+  const filter = query.trim().toLowerCase();
+  const sorted = videos.filter(video => video.youtubeId.toLowerCase().includes(filter)).sort((a, b) => {
     const comparison = a[sort.key].localeCompare(b[sort.key]);
     return comparison * (sort.direction === 'ascending' ? 1 : -1) || a.id.localeCompare(b.id);
   });
 
-  return <div className="editorial-video-scroll" role="region" aria-label="Таблиця відео" tabIndex={0}>
-    <table className="editorial-video-table" aria-label="Відео редакції">
-      <thead><tr>
-        <th scope="col">Прев’ю</th>
-        {columns.map(({ key, label }) => <th key={key} scope="col" aria-sort={sort.key === key ? sort.direction : undefined}>
-          <button type="button" onClick={() => setSort(previous => ({
-            key,
-            direction: previous.key === key
-              ? (previous.direction === 'ascending' ? 'descending' : 'ascending')
-              : (key === 'createdAt' ? 'descending' : 'ascending'),
-          }))}>
-            {label} <span aria-hidden="true">{sort.key === key ? (sort.direction === 'ascending' ? '↑' : '↓') : '↕'}</span>
-          </button>
-        </th>)}
-      </tr></thead>
-      <tbody>{sorted.map(video => <tr key={video.id}>
-        <td><VideoPreview youtubeId={video.youtubeId} /></td>
-        <td><Link href={'/editorial/videos/' + video.id}>{video.youtubeId}</Link></td>
-        <td><time dateTime={video.createdAt}>{dateFormat.format(new Date(video.createdAt))}</time></td>
-      </tr>)}</tbody>
-    </table>
-  </div>;
+  return <>
+    <label className="editorial-search">
+      Пошук за ID YouTube
+      <input type="search" value={query} onChange={event => setQuery(event.target.value)} />
+    </label>
+    <p role="status" className="editorial-results">
+      {sorted.length ? `Показано ${sorted.length} із ${videos.length}` : 'Відео за цим запитом не знайдено.'}
+    </p>
+    {sorted.length > 0 && <div className="editorial-video-scroll" role="region" aria-label="Таблиця відео" tabIndex={0}>
+      <table className="editorial-video-table" aria-label="Відео редакції">
+        <thead><tr>
+          <th scope="col">Прев’ю</th>
+          {columns.map(({ key, label }) => <th key={key} scope="col" aria-sort={sort.key === key ? sort.direction : undefined}>
+            <button type="button" onClick={() => setSort(previous => ({
+              key,
+              direction: previous.key === key
+                ? (previous.direction === 'ascending' ? 'descending' : 'ascending')
+                : (key === 'createdAt' ? 'descending' : 'ascending'),
+            }))}>
+              {label} <span aria-hidden="true">{sort.key === key ? (sort.direction === 'ascending' ? '↑' : '↓') : '↕'}</span>
+            </button>
+          </th>)}
+        </tr></thead>
+        <tbody>{sorted.map(video => <tr key={video.id}>
+          <td><VideoPreview youtubeId={video.youtubeId} /></td>
+          <td><Link href={'/editorial/videos/' + video.id}>{video.youtubeId}</Link></td>
+          <td><time dateTime={video.createdAt}>{dateFormat.format(new Date(video.createdAt))}</time></td>
+        </tr>)}</tbody>
+      </table>
+    </div>}
+  </>;
 }

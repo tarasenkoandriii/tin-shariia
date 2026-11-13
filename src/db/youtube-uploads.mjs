@@ -11,13 +11,13 @@ async function publisher(tx,identity){
   return member;
 }
 
-export async function createOAuthState(db,identity,{stateHash,codeVerifier}){
+export async function createOAuthState(db,identity,{stateHash,codeVerifier,requestCommentScope=false}){
   if(!/^[a-f0-9]{64}$/.test(stateHash)||typeof codeVerifier!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(codeVerifier)) throw Error('INVALID_INPUT');
   return db.transaction(async tx=>{
     const member=await publisher(tx,identity);
     await tx.query('DELETE FROM youtube_oauth_states WHERE expires_at<=now()');
-    await tx.query(`INSERT INTO youtube_oauth_states(state_hash,member_id,code_verifier,expires_at)
-      VALUES($1,$2,$3,now()+interval '10 minutes')`,[stateHash,member.id,codeVerifier]);
+    await tx.query(`INSERT INTO youtube_oauth_states(state_hash,member_id,code_verifier,expires_at,request_comment_scope)
+      VALUES($1,$2,$3,now()+interval '10 minutes',$4)`,[stateHash,member.id,codeVerifier,requestCommentScope===true]);
     return {memberId:member.id};
   });
 }
@@ -26,9 +26,9 @@ export async function consumeOAuthState(db,identity,stateHash){
   return db.transaction(async tx=>{
     const member=await publisher(tx,identity);
     const {rows:[state]}=await tx.query(`DELETE FROM youtube_oauth_states WHERE state_hash=$1 AND member_id=$2
-      AND expires_at>now() RETURNING code_verifier`,[stateHash,member.id]);
+      AND expires_at>now() RETURNING code_verifier,request_comment_scope`,[stateHash,member.id]);
     if(!state) throw Error('YOUTUBE_OAUTH_STATE_INVALID');
-    return {memberId:member.id,codeVerifier:state.code_verifier};
+    return {memberId:member.id,codeVerifier:state.code_verifier,requestCommentScope:state.request_comment_scope};
   });
 }
 
@@ -73,7 +73,7 @@ export async function createYouTubeShortUpload(db,identity,episodeId,shortId,inp
   episodeId=uuid(episodeId);shortId=uuid(shortId);
   return db.transaction(async tx=>{
     const member=await publisher(tx,identity);
-    if(input.confirmed!==true||!['private','unlisted','public'].includes(input.privacyStatus)
+    if(input.confirmed!==true||input.aiDisclosureConfirmed!==true||!['private','unlisted','public'].includes(input.privacyStatus)
       ||typeof input.idempotencyKey!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.idempotencyKey)) throw Error('INVALID_INPUT');
     const title=typeof input.title==='string'?input.title.trim():'';
     const description=typeof input.description==='string'?input.description.trim():'';
@@ -101,22 +101,26 @@ export async function createYouTubeShortUpload(db,identity,episodeId,shortId,inp
     if(!release) throw Error('YOUTUBE_RELEASE_APPROVAL_REQUIRED');
     if(input.reviewedSha256!==release.sha256) throw Error('YOUTUBE_MEDIA_CONFIRMATION_REQUIRED');
     const existingByKey=await tx.query('SELECT * FROM youtube_short_uploads WHERE idempotency_key=$1',[input.idempotencyKey]);
-    if(existingByKey.rows[0]) return existingByKey.rows[0];
-    const {rows:[existingMedia]}=await tx.query('SELECT id,created_by,state,title,privacy_status,sha256 FROM youtube_short_uploads WHERE media_revision_id=$1',[release.media_revision_id]);
+    if(existingByKey.rows[0]){
+      if(existingByKey.rows[0].contains_synthetic_media!==true) throw Error('YOUTUBE_UPLOAD_DISCLOSURE_REQUIRED');
+      return existingByKey.rows[0];
+    }
+    const {rows:[existingMedia]}=await tx.query('SELECT id,created_by,state,title,privacy_status,sha256,contains_synthetic_media FROM youtube_short_uploads WHERE media_revision_id=$1',[release.media_revision_id]);
     if(existingMedia){
       if(existingMedia.created_by===member.id&&existingMedia.title===title&&existingMedia.privacy_status===input.privacyStatus
-        &&existingMedia.sha256===release.sha256) return existingMedia;
+        &&existingMedia.sha256===release.sha256&&existingMedia.contains_synthetic_media===true) return existingMedia;
       throw Error('YOUTUBE_UPLOAD_EXISTS');
     }
     const id=randomUUID();
     const {rows:[upload]}=await tx.query(`INSERT INTO youtube_short_uploads
-      (id,episode_id,media_revision_id,connection_id,created_by,idempotency_key,title,description,privacy_status,total_bytes,sha256)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-      RETURNING id,state,title,privacy_status,total_bytes,sha256,created_at`,
+      (id,episode_id,media_revision_id,connection_id,created_by,idempotency_key,title,description,privacy_status,total_bytes,sha256,contains_synthetic_media)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true)
+      RETURNING id,state,title,privacy_status,total_bytes,sha256,contains_synthetic_media,created_at`,
     [id,episodeId,release.media_revision_id,connection.id,member.id,input.idempotencyKey,title,description,
       input.privacyStatus,release.expected_bytes,release.sha256]);
     await tx.query(`INSERT INTO youtube_upload_events(upload_id,actor_id,action,details) VALUES($1,$2,'queued',$3::text::jsonb)`,
-      [upload.id,member.id,json({privacyStatus:upload.privacy_status,mediaRevisionId:release.media_revision_id,sha256:release.sha256})]);
+      [upload.id,member.id,json({privacyStatus:upload.privacy_status,mediaRevisionId:release.media_revision_id,sha256:release.sha256,
+        containsSyntheticMedia:true})]);
     return upload;
   });
 }
@@ -125,7 +129,7 @@ export async function loadYouTubeUpload(db,identity,id){
   await publisher(db,identity);
   const {rows:[row]}=await db.query(`SELECT u.id,u.episode_id,u.media_revision_id,u.connection_id,u.title,u.description,
     u.privacy_status,u.state,u.upload_uri_encrypted,u.upload_offset,u.total_bytes,u.sha256,u.youtube_id,
-    u.processing_status,u.actual_privacy_status,u.error_code,u.run_lease,u.created_at,m.pathname,m.expires_at,
+    u.contains_synthetic_media,u.actual_contains_synthetic_media,u.processing_status,u.actual_privacy_status,u.error_code,u.run_lease,u.created_at,m.pathname,m.expires_at,
     c.refresh_token_encrypted,c.channel_id
     FROM youtube_short_uploads u JOIN episode_media_revisions m ON m.id=u.media_revision_id
     JOIN youtube_connections c ON c.id=u.connection_id WHERE u.id=$1`,[uuid(id)]);
@@ -136,7 +140,7 @@ export async function loadYouTubeUpload(db,identity,id){
 export async function loadYouTubeUploadInternal(db,id){
   const {rows:[row]}=await db.query(`SELECT u.id,u.episode_id,u.media_revision_id,u.connection_id,u.title,u.description,
     u.privacy_status,u.state,u.upload_uri_encrypted,u.upload_offset,u.total_bytes,u.sha256,u.youtube_id,
-    u.processing_status,u.actual_privacy_status,u.error_code,u.run_lease,u.created_at,m.pathname,m.expires_at,
+    u.contains_synthetic_media,u.actual_contains_synthetic_media,u.processing_status,u.actual_privacy_status,u.error_code,u.run_lease,u.created_at,m.pathname,m.expires_at,
     c.refresh_token_encrypted,c.channel_id
     FROM youtube_short_uploads u JOIN episode_media_revisions m ON m.id=u.media_revision_id
     JOIN youtube_connections c ON c.id=u.connection_id WHERE u.id=$1`,[uuid(id)]);
@@ -148,7 +152,7 @@ export async function loadYouTubeUploadForShort(db,identity,episodeId,shortId){
   await publisher(db,identity);
   const {rows:[row]}=await db.query(`SELECT u.id,u.episode_id,u.media_revision_id,u.title,u.description,u.privacy_status,
     u.state,u.upload_offset,u.total_bytes,u.sha256,u.youtube_id,u.processing_status,u.actual_privacy_status,
-    u.error_code,u.created_at FROM youtube_short_uploads u JOIN shorts_renders s ON s.audit_media_revision_id=u.media_revision_id
+    u.error_code,u.contains_synthetic_media,u.actual_contains_synthetic_media,u.created_at FROM youtube_short_uploads u JOIN shorts_renders s ON s.audit_media_revision_id=u.media_revision_id
     WHERE u.episode_id=$1 AND s.id=$2`,[uuid(episodeId),uuid(shortId)]);
   if(!row) throw Error('NOT_FOUND');
   return row;
@@ -163,9 +167,10 @@ export async function patchYouTubeUpload(db,id,values){
       state=COALESCE($2,state),upload_uri_encrypted=COALESCE($3,upload_uri_encrypted),
       upload_offset=COALESCE($4,upload_offset),youtube_id=COALESCE($5,youtube_id),
       processing_status=COALESCE($6,processing_status),actual_privacy_status=COALESCE($7,actual_privacy_status),
-      error_code=$8,run_lease=$9,updated_at=now() WHERE id=$1 RETURNING state,upload_offset,youtube_id,processing_status,actual_privacy_status`,
+      actual_contains_synthetic_media=COALESCE($8,actual_contains_synthetic_media),
+      error_code=$9,run_lease=$10,updated_at=now() WHERE id=$1 RETURNING state,upload_offset,youtube_id,processing_status,actual_privacy_status,actual_contains_synthetic_media`,
     [uploadId,values.state??null,values.uploadUriEncrypted??null,values.offset??null,values.youtubeId??null,
-      values.processingStatus??null,values.actualPrivacyStatus??null,values.errorCode??null,values.lease??null]);
+      values.processingStatus??null,values.actualPrivacyStatus??null,values.actualContainsSyntheticMedia??null,values.errorCode??null,values.lease??null]);
     if(before.state!==row.state||Number(before.upload_offset)!==Number(row.upload_offset)){
       const action=row.state==='uploading'?(before.state==='queued'?'session_started':'chunk_accepted'):
         row.state==='processing'?'processing':row.state==='published'?'published':row.state==='failed'?'failed':row.state==='unknown'?'unknown':null;

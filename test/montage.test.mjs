@@ -39,7 +39,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
   const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
   const db=native?await database():new PGlite();
   try{
-    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit','0010_youtube_uploads']){
+    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit','0010_youtube_uploads','0011_youtube_short_proposals','0012_soniox_requests','0013_ai_disclosures','0014_publication_insights','0015_youtube_comment_campaign','0016_montage_plan_library','0017_tiktok_manual_publications']){
       await db.exec(await readFile(new URL('../drizzle/'+name+'.sql',import.meta.url),'utf8'));
     }
     for(const [id,roles] of [['media-author',['author']],['media-review',['factchecker','editor']],['media-publisher',['publisher']],['other-author',['author']]]){
@@ -60,9 +60,12 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
       parentId:claim.id,claimVersion:claim.version,title:'Master',script:'Script',pinnedComment:'Exact package',
     });
     const reserve=(identity,bytes=600)=>initMontage(db,identity,episode.id,{version:episode.version,bytes});
-    await assert.rejects(reserve('media-author'),/APPROVAL_REQUIRED/);
+    await assert.rejects(reserve('media-author'),/GROK_PREFLIGHT_REQUIRED/);
     episode=await change('media-author','episode','submit',episode);
     episode=await change('media-review','episode','approve',episode);
+    await db.query(`INSERT INTO episode_grok_reviews(episode_id,episode_version,round,state,batch_request_id,input_snapshot,accepted_by,accepted_at)
+      VALUES($1,$2,1,'accepted','39d1bb4a-8a8a-4b54-a5a3-8c7d14334f10','{}'::jsonb,
+        (SELECT id FROM members WHERE clerk_user_id='media-review'),now())`,[episode.id,episode.version]);
     await assert.rejects(reserve('media-review'),/FORBIDDEN/);
     await assert.rejects(reserve('media-author',129*1024*1024),/SIZE_INVALID/);
     const row=await reserve('media-author');
@@ -154,7 +157,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
     assert.equal(result.status,'succeeded');
     assert.equal(result.reports[0].coverage[0].endMs,2000);
     assert.equal(result.reports[0].findings[0].finding.observation,'Test finding');
-    const publish={url:'https://youtu.be/QAstg8test0',version:episode.version,publishedAt:new Date().toISOString(),confirmed:true,mediaRevisionId:row.id};
+    const publish={url:'https://youtu.be/QAstg8test0',version:episode.version,publishedAt:new Date().toISOString(),confirmed:true,aiDisclosureConfirmed:true,mediaRevisionId:row.id};
     await assert.rejects(registerPublication(db,'media-publisher',episode.id,publish),/RELEASE_APPROVAL_REQUIRED/);
     await assert.rejects(reviewVideoAudit(db,'media-author',episode.id,row.id,{action:'approve'}),/FORBIDDEN/);
     await assert.rejects(reviewVideoAudit(db,'media-review',episode.id,row.id,{action:'approve'}),/FINDINGS_OPEN/);

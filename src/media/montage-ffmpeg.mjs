@@ -88,9 +88,9 @@ export function ffmpegMontage(env=process.env){
       method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},
       body:JSON.stringify(montageJob(source)),
     }),
-    submitShorts:(key,source,manifest)=>request('/api/ffmpeg',{
+    submitShorts:(key,source,manifest,renderOptions)=>request('/api/ffmpeg',{
       method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},
-      body:JSON.stringify(shortsRenderJob(source,manifest)),
+      body:JSON.stringify(shortsRenderJob(source,manifest,renderOptions)),
     }),
     submitAudit:(key,source)=>request('/api/ffmpeg',{
       method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},
@@ -142,6 +142,6 @@ export function ffmpegShorts(env=process.env){
   const montage=ffmpegMontage(env);
   return {
     lookup:montage.lookup,job:montage.job,shortFile:montage.shortFile,report:montage.report,submitAudit:montage.submitAudit,
-    submit:(key,source,manifest)=>montage.submitShorts(key,source,manifest),
+    submit:(key,source,manifest,renderOptions)=>montage.submitShorts(key,source,manifest,renderOptions),
   };
 }

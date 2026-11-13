@@ -25,9 +25,8 @@ export default async function YouTubeChannelPage({ searchParams }: { searchParam
   try { data = await listShariyChannelVideos(pageToken); }
   catch (error) { errorCode = error instanceof Error ? error.message : 'YOUTUBE_READ_FAILED'; }
 
-  return <main>
-    <UserButton />
-    <p><Link href="/editorial">← Редакція</Link></p>
+  return <main className="editorial-workspace">
+    <header className="editorial-header"><Link href="/editorial">← Відео редакції</Link><UserButton /></header>
     <h1>Випуски каналу Анатолія Шарія</h1>
     <p>Останні відео з YouTube. Новіші випуски зверху; сторінки містять по 20 відео.</p>
     {(member.roles.includes('author') || member.roles.includes('publisher')) && <YouTubeShortProposal />}

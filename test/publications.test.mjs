@@ -11,7 +11,8 @@ import { packageZip } from '../src/editorial/publication-zip.mjs';
 import { reviewVideoAudit } from '../src/db/video-audit.mjs';
 
 const sql=['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue',
-  '0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit','0010_youtube_uploads'];
+  '0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit','0010_youtube_uploads',
+  '0011_youtube_short_proposals','0012_soniox_requests','0013_ai_disclosures','0014_publication_insights','0015_youtube_comment_campaign','0016_montage_plan_library'];
 const time=days=>new Date(Date.now()-days*86400000).toISOString();
 
 test('publication requires a current approval and freezes the package, metrics and corrections',async()=>{
@@ -34,13 +35,16 @@ test('publication requires a current approval and freezes the package, metrics a
     const script={parentId:claim.id,claimVersion:claim.version,title:'Перевірка',script:'Вступ та висновок',subtitles:'1\nПідзаголовок'};
     let episode=await change('pub-author','episode','create',null,script);
     const publishedAt=time(35);
-    const publication={url:'https://youtu.be/QAPubTest02',version:episode.version,publishedAt,confirmed:true,
+    const publication={url:'https://youtu.be/QAPubTest02',version:episode.version,publishedAt,confirmed:true,aiDisclosureConfirmed:true,
       mediaRevisionId:'00000000-0000-4000-8000-000000000000'};
     const register=(data=publication)=>registerPublication(db,'pub-publisher',episode.id,data);
     await assert.rejects(register(),/APPROVAL_REQUIRED/);
     await assert.rejects(publicationPackage(db,'pub-author',episode.id,1),/FORBIDDEN/);
     episode=await change('pub-author','episode','submit',episode);
     episode=await change('pub-review','episode','approve',episode);
+    await db.query(`INSERT INTO episode_grok_reviews(episode_id,episode_version,round,state,batch_request_id,input_snapshot,accepted_by,accepted_at)
+      VALUES($1,$2,1,'accepted','f74bd7b0-822e-48fa-8b1e-d67488213c41','{}'::jsonb,
+        (SELECT id FROM members WHERE clerk_user_id='pub-review'),now())`,[episode.id,episode.version]);
     const archive=unzipSync(packageZip(await publicationPackage(db,'pub-publisher',episode.id,1)));
     assert.equal(strFromU8(archive['script.txt']).trim(),script.script);
     assert.ok(archive['subtitles.txt']);

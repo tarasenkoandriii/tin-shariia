@@ -1,4 +1,5 @@
 import { privateHeaders, publicationError, publicationIdentity, publicationInput } from '../../../../../access/publication-http';
+import { editorialNarration } from '../../../../../analysis/editorial-narration.mjs';
 import { reserveSoniox } from '../../../../../analysis/soniox-quota';
 import { uuid } from '../../../../../editorial/workflow-input.mjs';
 
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
       const result = await fetch('https://tts-rt.soniox.com/tts', {
         method:'POST', redirect:'error', signal:AbortSignal.timeout(45000),
         headers:{'Content-Type':'application/json', Authorization:'Bearer '+key},
-        body:JSON.stringify({model:'tts-rt-v2', language:'uk', voice:'Maya', audio_format:'mp3', speed:1.15, text}),
+        body:JSON.stringify({...editorialNarration, text}),
       });
       if (!result.ok) throw Error('SONIOX_PROVIDER_ERROR');
       const audio = await result.arrayBuffer();

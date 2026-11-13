@@ -2,15 +2,18 @@ import {createHash,randomUUID} from 'node:crypto';
 import {del,put} from '@vercel/blob';
 import {ffmpegShorts,validateShortTechnicalReport} from './montage-ffmpeg.mjs';
 import {montageUrl,STORAGE_DAYS} from './montage-storage.mjs';
+import {renderShortStamp} from './shorts-stamp.mjs';
 import {createShortAuditMedia,updateShortRender} from '../db/shorts.mjs';
 
 export async function cleanupExpiredShorts(db){
-  const {rows}=await db.query(`SELECT id,pathname FROM shorts_renders WHERE expires_at<=now()
+  const {rows}=await db.query(`SELECT id,episode_id,pathname FROM shorts_renders WHERE expires_at<=now()
     AND state<>'expired' ORDER BY expires_at LIMIT 3`);
   let removed=0;
   for(const row of rows){
     try{
       if(row.pathname) await del(row.pathname);
+      try{await del(`shorts-stamps/${row.episode_id}/${row.id}.png`);}catch{}
+      try{await del(`shorts-captions/${row.episode_id}/${row.id}.srt`);}catch{}
       await db.query("UPDATE shorts_renders SET state='expired',pathname=NULL WHERE id=$1 AND expires_at<=now()",[row.id]);
       removed++;
     }catch{ /* Keep the record and retry cleanup on the next cron run. */ }
@@ -46,12 +49,22 @@ export async function startShortRender(db,id,startRun){
   return {started:true};
 }
 
-export async function shortsStep(db,id,token,{client=ffmpegShorts(),sign=montageUrl,save=put}={}){
-  const {rows:[row]}=await db.query(`SELECT s.*,m.pathname AS source_path,m.expires_at AS source_expires_at
+export async function shortsStep(db,id,token,{client=ffmpegShorts(),sign=montageUrl,save=put,saveStamp=put,saveCaptions=put,remove=del,renderStamp=renderShortStamp}={}){
+  const {rows:[row]}=await db.query(`SELECT s.*,m.pathname AS source_path,m.expires_at AS source_expires_at,
+      COALESCE(v.spec,p.spec) AS plan_spec
     FROM shorts_renders s JOIN episode_media_revisions m ON m.id=s.media_revision_id
+    LEFT JOIN editorial_montage_plan_versions v ON v.plan_id=s.montage_plan_id AND v.version=s.montage_plan_version
+    LEFT JOIN editorial_montage_plans p ON p.id=s.montage_plan_id
     WHERE s.id=$1 AND s.run_token=$2 AND s.state IN ('rendering','technical_check') AND s.run_lease>now()`,[id,token]);
   if(!row) return {done:true};
+  const stampPath=`shorts-stamps/${row.episode_id}/${row.id}.png`;
+  const captionsPath=`shorts-captions/${row.episode_id}/${row.id}.srt`;
+  const removeRenderAssets=async()=>{
+    try{await remove(stampPath);}catch{}
+    try{await remove(captionsPath);}catch{}
+  };
   const complete=async(state,errorCode=null,extra={})=>{
+    if(['failed','expired','ready'].includes(state))await removeRenderAssets();
     await updateShortRender(db,id,token,{state,errorCode,...extra,lease:null});
     return {done:true};
   };
@@ -62,12 +75,29 @@ export async function shortsStep(db,id,token,{client=ffmpegShorts(),sign=montage
       const key='tin-shorts-'+id;
       let job=row.ffmpeg_id?await client.job(row.ffmpeg_id):await client.lookup(key);
       if(!job&&row.ffmpeg_id) return complete('failed','SHORTS_FFMPEG_JOB_EXPIRED');
-      if(!job) job=await client.submit(key,await sign({pathname:row.source_path,expires_at:row.source_expires_at},'get',25),row.manifest);
+      if(!job){
+        let stampUrl=null,captionsUrl=null;
+        const planSpec=typeof row.plan_spec==='string'?JSON.parse(row.plan_spec):row.plan_spec;
+        if(planSpec?.endingStamp?.enabled===true){
+          const bytes=await renderStamp(planSpec);
+          await saveStamp(stampPath,bytes,{access:'private',contentType:'image/png',addRandomSuffix:false,
+            allowOverwrite:true,cacheControlMaxAge:60});
+          stampUrl=await sign({pathname:stampPath,expires_at:new Date(Date.now()+30*60*1000)},'get',25);
+        }
+        if(row.manifest.subtitles){
+          await saveCaptions(captionsPath,Buffer.from(row.manifest.subtitles,'utf8'),{access:'private',contentType:'application/x-subrip',
+            addRandomSuffix:false,allowOverwrite:true,cacheControlMaxAge:60});
+          captionsUrl=await sign({pathname:captionsPath,expires_at:new Date(Date.now()+30*60*1000)},'get',25);
+        }
+        job=await client.submit(key,await sign({pathname:row.source_path,expires_at:row.source_expires_at},'get',25),row.manifest,
+          stampUrl||captionsUrl?{stampUrl,stampSpec:planSpec,captionsUrl}:undefined);
+      }
       if(!job?.id) throw Error('SHORTS_RENDER_UNAVAILABLE');
       if(!await updateShortRender(db,id,token,{state:'rendering',ffmpegId:job.id,lease:new Date(Date.now()+180000)})) return {done:true};
       if(['failed','canceled'].includes(job.status)) return complete('failed','SHORTS_FFMPEG_FAILED');
       if(job.status!=='succeeded') return {done:false};
       const bytes=await client.shortFile(job);
+      await removeRenderAssets();
       if(bytes.length<16||bytes.toString('ascii',4,8)!=='ftyp') return complete('failed','SHORTS_OUTPUT_INVALID');
       const sha256=createHash('sha256').update(bytes).digest('hex');
       const pathname=`shorts/${row.episode_id}/${id}.mp4`;
@@ -92,7 +122,7 @@ export async function shortsStep(db,id,token,{client=ffmpegShorts(),sign=montage
   }catch(error){
     const code=String(error?.message??'');
     if(['MONTAGE_DISABLED','MONTAGE_FFMPEG_REJECTED','SHORTS_RENDER_INVALID','SHORTS_INVALID_INPUT',
-      'SHORTS_INVALID_CLIP','SHORTS_DURATION_INVALID','SHORTS_INVALID_SOURCE','SHORTS_OUTPUT_INVALID',
+      'SHORTS_INVALID_CLIP','SHORTS_DURATION_INVALID','SHORTS_INVALID_SOURCE','SHORTS_INVALID_STAMP','SHORTS_INVALID_SUBTITLES','SHORTS_OUTPUT_INVALID',
       'MONTAGE_INVALID_MEDIA','MONTAGE_REPORT_INVALID','MONTAGE_AUDIO_INCOMPLETE','MONTAGE_AUDIO_SILENT',
       'SHORTS_TECH_CHECK_REJECTED'].includes(code))
       return complete('failed',code.startsWith('MONTAGE_')?'SHORTS_TECH_CHECK_FAILED':code.startsWith('SHORTS_')?code:'SHORTS_RENDER_REJECTED');

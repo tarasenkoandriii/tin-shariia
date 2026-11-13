@@ -6,6 +6,9 @@ import { listShortRenders } from '../../../../db/shorts.mjs';
 import { loadPublications } from '../../../../db/publications.mjs';
 import { PublicationPanel, type Publication } from '../../publication-panel';
 import { AnalysisPanel } from '../../analysis-panel';
+import {EpisodeGrokReviewPanel,type EpisodeGrokReview} from '../../episode-grok-review-panel';
+import {listEpisodeGrokReviewsForEpisodes} from '../../../../db/episode-grok.mjs';
+import {listUsableMontagePlans} from '../../../../db/montage-plans.mjs';
 import { notFound, redirect } from 'next/navigation';
 import { clerkId } from '../../../../access/session';
 import { database } from '../../../../db/runtime.mjs';
@@ -13,6 +16,7 @@ import { loadTranscript, loadWorkflow } from '../../../../db/editorial-workflow.
 import { ClaimForm, EpisodeForm, TranscriptForm, Transitions } from '../../workflow-controls';
 import { verdictLabels } from "../../workflow-types";
 import type { Claim, ClaimContent, Episode, Transcript } from '../../workflow-types';
+import type {MontagePlanOption} from '../../shorts-panel';
 
 type Segment = { position: number; start_ms: string | null; end_ms: string | null; body: string };
 type WorkflowEvent = {
@@ -71,7 +75,9 @@ export default async function VideoPage({ params, searchParams }: {
   });
   if (!workflow.video) notFound();
   const video = workflow.video;
-  const [publications,montages]: [Publication[],Montage[]] = await Promise.all([loadPublications(db,id,videoId),listMontage(db,id,videoId)]);
+  const [publications,montages,planOptions]: [Publication[],Montage[],MontagePlanOption[]] = await Promise.all([
+    loadPublications(db,id,videoId),listMontage(db,id,videoId),listUsableMontagePlans(db,id),
+  ]);
   const byEpisode = new Map(publications.map(publication=>[publication.episode_id,publication]));
   const author = workflow.roles.includes('author');
   const transcripts: Transcript[] = workflow.transcripts;
@@ -80,6 +86,10 @@ export default async function VideoPage({ params, searchParams }: {
   const events: WorkflowEvent[] = workflow.events;
   const shortsByEpisode=new Map(await Promise.all(episodes.map(async episode=>
     [episode.id,await listShortRenders(db,id,episode.id)] as const)));
+  const grokRows=await listEpisodeGrokReviewsForEpisodes(db,id,episodes.map(episode=>episode.id)) as (EpisodeGrokReview&{episode_id:string})[];
+  const grokByEpisode=new Map<string,EpisodeGrokReview[]>(episodes.map(episode=>[
+    episode.id,grokRows.filter(row=>row.episode_id===episode.id),
+  ]));
   const requestedTranscript = (await searchParams).transcript;
   const chosen = transcripts.find(t=>t.id===requestedTranscript);
   const segments: Segment[] = chosen ? await loadTranscript(db,id,videoId,chosen.id) : [];
@@ -145,14 +155,25 @@ export default async function VideoPage({ params, searchParams }: {
           {author && claim.status==='approved' && !byEpisode.has(episode.id) && <details><summary>Редагувати сценарій</summary>
             <EpisodeForm key={episode.revision} claim={claim} episode={episode} />
           </details>}
-          <MontagePanel episode={episode} items={montages.filter(item=>item.episode_id===episode.id)}
-            canUpload={author&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)}
-            canReview={workflow.roles.includes('editor')} />
-          <ShortsPanel episode={episode}
-            sources={montages.filter(item=>item.episode_id===episode.id).map(item=>({id:item.id,episode_version:item.episode_version,state:item.state}))}
-            items={shortsByEpisode.get(episode.id)??[]}
-            canCreate={author&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)}
-            canReview={workflow.roles.includes('editor')} canPublish={workflow.roles.includes('publisher')} />
+          {(()=>{
+            const reviews=grokByEpisode.get(episode.id)??[];
+            const current=reviews.filter(item=>item.episode_version===episode.version).sort((a,b)=>b.round-a.round)[0];
+            const preflightAccepted=current?.state==='accepted';
+            return <>
+              <EpisodeGrokReviewPanel episode={episode} reviews={reviews}
+                canRun={author&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)}
+                canAccept={workflow.roles.includes('editor')&&episode.status==='approved'} />
+              <MontagePanel episode={episode} items={montages.filter(item=>item.episode_id===episode.id)}
+                canUpload={author&&preflightAccepted&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)}
+                canReview={workflow.roles.includes('editor')} />
+              <ShortsPanel episode={episode}
+                plans={planOptions}
+                sources={montages.filter(item=>item.episode_id===episode.id).map(item=>({id:item.id,episode_version:item.episode_version,state:item.state}))}
+                items={shortsByEpisode.get(episode.id)??[]}
+                canCreate={author&&preflightAccepted&&episode.status==='approved'&&!episode.stale&&!byEpisode.has(episode.id)}
+                canReview={workflow.roles.includes('editor')} canPublish={workflow.roles.includes('publisher')} />
+            </>;
+          })()}
           <PublicationPanel episode={episode} publication={byEpisode.get(episode.id)} roles={workflow.roles}
             mediaRevisions={montages.filter(item=>item.episode_id===episode.id).map(item=>({
               id:item.id,ordinal:item.ordinal,version:item.episode_version,sha256:item.sha256,

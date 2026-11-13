@@ -5,6 +5,7 @@ import { json, useRequest } from './workflow-controls';
 import type { Episode } from './workflow-types';
 
 type Metric = { day:number; measured_at:string; views:number; average_view_percent:number; source:string };
+type YouTubeStats={fetched_at:string;views:string|null;likes:string|null;comments:string|null;error_code:string|null}|null;
 type Correction = {
   id:string; status:string; revision:number; kind:string; original:string; replacement:string;
   reason:string; author:string; review_comment:string|null; posting_location:string|null;
@@ -12,7 +13,7 @@ type Correction = {
 type ReleaseMedia={id:string;ordinal:number;version:number;sha256:string|null;releaseApproved:boolean};
 export type Publication = {
   id:string; episode_id:string; episode_version:number; media_revision_id:string|null; media_ordinal:number|null; youtube_id:string;
-  published_at:string; metrics:Metric[]; corrections:Correction[];
+  published_at:string; ai_disclosed:boolean; youtube_stats:YouTubeStats; metrics:Metric[]; corrections:Correction[];
   history:{id:number; action:string; created_at:string; actor:string}[];
 };
 
@@ -34,7 +35,7 @@ function Register({episode,media}:{episode:Episode;media:ReleaseMedia[]}){
     const form=fields(event);
     void request.send('/api/episodes/'+episode.id+'/publications',json({
       version:episode.version,url:form.get('url'),publishedAt:new Date(String(form.get('publishedAt'))).toISOString(),
-      mediaRevisionId:form.get('mediaRevisionId'),confirmed:form.has('confirmed'),
+      mediaRevisionId:form.get('mediaRevisionId'),confirmed:form.has('confirmed'),aiDisclosureConfirmed:form.has('aiDisclosureConfirmed'),
     }));
   }}>
     <label>Посилання опублікованого відео YouTube <input type="url" name="url" maxLength={2048} required /></label>
@@ -45,6 +46,8 @@ function Register({episode,media}:{episode:Episode;media:ReleaseMedia[]}){
         Монтаж {item.ordinal} · версія сценарію {item.version} · SHA-256 {item.sha256?.slice(0,12)}
       </option>)}
     </select></label>
+    <p>Перед реєстрацією у YouTube Studio потрібно ввімкнути позначку AI-контенту для цього реалістичного синтетичного відео.</p>
+    <label><input type="checkbox" name="aiDisclosureConfirmed" required /> Позначку AI-контенту ввімкнено в YouTube Studio.</label>
     <label><input type="checkbox" name="confirmed" required /> Опубліковано відео за цією версією сценарію.</label>
     <button disabled={request.pending}>Зареєструвати публікацію</button>
     {request.message&&<output role="status">{request.message}</output>}
@@ -108,6 +111,11 @@ export function PublicationPanel({episode,publication,roles,mediaRevisions}:{epi
     {publication ? <>
       <p><a href={'https://www.youtube.com/watch?v='+publication.youtube_id} target="_blank" rel="noreferrer">
         Переглянути публікацію</a> · {formatTime(publication.published_at)} (Київ)</p>
+      <p>Позначка AI-контенту в YouTube Studio: {publication.ai_disclosed?'підтверджена редактором':'не підтверджена'}</p>
+      {publication.youtube_stats?.error_code?<p>Статистика YouTube: тимчасово недоступна ({publication.youtube_stats.error_code}).</p>:
+        publication.youtube_stats&&<p>Власна статистика YouTube · {Number(publication.youtube_stats.views??0).toLocaleString('uk-UA')} переглядів ·
+          {Number(publication.youtube_stats.likes??0).toLocaleString('uk-UA')} вподобань ·
+          {Number(publication.youtube_stats.comments??0).toLocaleString('uk-UA')} коментарів · замір {formatTime(publication.youtube_stats.fetched_at)}</p>}
       {publication.media_revision_id&&<p>Допущений монтаж {publication.media_ordinal??'—'} · ревізія {publication.media_revision_id.slice(0,8)}</p>}
       <h6>Показники</h6>
       {publication.metrics.length>0&&<ul>{publication.metrics.map(metric=><li key={metric.day}>

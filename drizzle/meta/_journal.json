@@ -92,6 +92,41 @@
       "when": 1794530000000,
       "tag": "0012_soniox_requests",
       "breakpoints": false
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794540000000,
+      "tag": "0013_ai_disclosures",
+      "breakpoints": false
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794550000000,
+      "tag": "0014_publication_insights",
+      "breakpoints": false
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794551000000,
+      "tag": "0015_youtube_comment_campaign",
+      "breakpoints": false
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794552000000,
+      "tag": "0016_montage_plan_library",
+      "breakpoints": false
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794553000000,
+      "tag": "0017_tiktok_manual_publications",
+      "breakpoints": false
     }
   ]
 }

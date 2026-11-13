@@ -21,14 +21,16 @@ export function youtubeOffsetFromRange(range,totalBytes){
   return offset;
 }
 
-export function youtubeProcessingOutcome(video,expectedPrivacy){
+export function youtubeProcessingOutcome(video,expectedPrivacy,expectedSynthetic=true){
   if(typeof video?.id!=='string'||typeof expectedPrivacy!=='string')return {state:'unknown',done:false};
   const status=video.status?.uploadStatus??'unknown';
   const privacy=video.status?.privacyStatus??null;
+  const containsSyntheticMedia=video.status?.containsSyntheticMedia===true;
   if(['rejected','failed'].includes(status))return {state:'failed',done:true,status,privacy,errorCode:'YOUTUBE_PROCESSING_FAILED'};
   if(status==='processed'&&privacy!==expectedPrivacy)return {state:'failed',done:true,status,privacy,errorCode:'YOUTUBE_PRIVACY_MISMATCH'};
-  if(status==='processed')return {state:'published',done:true,status,privacy,errorCode:null};
-  return {state:'processing',done:false,status,privacy,errorCode:null};
+  if(status==='processed'&&containsSyntheticMedia!==expectedSynthetic)return {state:'failed',done:true,status,privacy,containsSyntheticMedia,errorCode:'YOUTUBE_AI_DISCLOSURE_MISMATCH'};
+  if(status==='processed')return {state:'published',done:true,status,privacy,containsSyntheticMedia,errorCode:null};
+  return {state:'processing',done:false,status,privacy,containsSyntheticMedia,errorCode:null};
 }
 
 async function accessToken(row){
@@ -44,7 +46,7 @@ async function startSession(db,row,token){
     Authorization:`Bearer ${token}`,'Content-Type':'application/json','X-Upload-Content-Type':'video/mp4',
     'X-Upload-Content-Length':String(row.total_bytes),
   },body:JSON.stringify({snippet:{title:row.title,description:row.description},
-    status:{privacyStatus:row.privacy_status,selfDeclaredMadeForKids:false}}),cache:'no-store'});
+    status:{privacyStatus:row.privacy_status,selfDeclaredMadeForKids:false,containsSyntheticMedia:true}}),cache:'no-store'});
   if(!response.ok) throw Error('YOUTUBE_SESSION_CREATE_FAILED');
   const location=response.headers.get('location');
   if(!location) throw Error('YOUTUBE_SESSION_INVALID');
@@ -115,8 +117,9 @@ async function reconcileVideo(db,row,token){
   const body=await response.json();
   const video=body.items?.[0];
   if(!video) throw Error('YOUTUBE_STATUS_UNAVAILABLE');
-  const result=youtubeProcessingOutcome(video,row.privacy_status);
-  await patchYouTubeUpload(db,row.id,{state:result.state,processingStatus:result.status,actualPrivacyStatus:result.privacy,errorCode:result.errorCode});
+  const result=youtubeProcessingOutcome(video,row.privacy_status,row.contains_synthetic_media);
+  await patchYouTubeUpload(db,row.id,{state:result.state,processingStatus:result.status,actualPrivacyStatus:result.privacy,
+    actualContainsSyntheticMedia:result.containsSyntheticMedia,errorCode:result.errorCode});
   return {done:result.done,state:result.state};
 }
 

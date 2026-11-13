@@ -19,6 +19,9 @@ export async function initMontage(db,identity,episodeId,input){
     const member=await memberFor(tx,identity,'author');
     const {rows:[episode]}=await tx.query('SELECT * FROM episodes WHERE id=$1 FOR UPDATE',[episodeId]);
     if(!episode) throw Error('NOT_FOUND');
+    const {rows:[preflight]}=await tx.query(`SELECT state FROM episode_grok_reviews WHERE episode_id=$1 AND episode_version=$2
+      ORDER BY round DESC LIMIT 1`,[episode.id,episode.version]);
+    if(preflight?.state!=='accepted')throw Error('GROK_PREFLIGHT_REQUIRED');
     const {rows:published}=await tx.query('SELECT id FROM publications WHERE episode_id=$1',[episodeId]);
     if(published.length) throw Error('EPISODE_PUBLISHED');
     const snapshot=await packageFor(tx,episode,input.version);
@@ -65,6 +68,9 @@ export async function confirmMontage(db,identity,episodeId,id,object){
     const {rows:[episode]}=await tx.query('SELECT * FROM episodes WHERE id=$1 FOR SHARE',[episodeId]);
     const {rows:published}=await tx.query('SELECT id FROM publications WHERE episode_id=$1',[episodeId]);
     if(published.length) throw Error('EPISODE_PUBLISHED');
+    const {rows:[preflight]}=await tx.query(`SELECT state FROM episode_grok_reviews WHERE episode_id=$1 AND episode_version=$2
+      ORDER BY round DESC LIMIT 1`,[episodeId,row.episode_version]);
+    if(preflight?.state!=='accepted')throw Error('GROK_PREFLIGHT_REQUIRED');
     await packageFor(tx,episode,row.episode_version);
     const {rows:[updated]}=await tx.query(`UPDATE episode_media_revisions SET state='queued',
       expires_at=COALESCE($2::timestamptz,expires_at) WHERE id=$1 RETURNING *`,[row.id,object.expiresAt??null]);

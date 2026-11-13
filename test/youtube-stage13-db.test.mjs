@@ -6,7 +6,8 @@ import {consumeOAuthState,createOAuthState,getYouTubeConnection,saveYouTubeConne
 
 const migrations=['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue',
   '0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval',
-  '0008_shorts','0009_shorts_audit','0010_youtube_uploads'];
+  '0008_shorts','0009_shorts_audit','0010_youtube_uploads','0011_youtube_short_proposals','0012_soniox_requests',
+  '0013_ai_disclosures','0014_publication_insights','0015_youtube_comment_campaign','0016_montage_plan_library'];
 
 test('YouTube OAuth state is publisher-only, identity-bound and single-use; channel secrets never reach status view',async()=>{
   const db=new PGlite();
@@ -20,7 +21,7 @@ test('YouTube OAuth state is publisher-only, identity-bound and single-use; chan
     await assert.rejects(createOAuthState(db,'author',{stateHash,codeVerifier}),/FORBIDDEN/);
     await createOAuthState(db,'publisher',{stateHash,codeVerifier});
     await assert.rejects(consumeOAuthState(db,'author',stateHash),/FORBIDDEN/);
-    assert.deepEqual(await consumeOAuthState(db,'publisher',stateHash),{memberId:(await db.query("SELECT id FROM members WHERE clerk_user_id='publisher'")).rows[0].id,codeVerifier});
+    assert.deepEqual(await consumeOAuthState(db,'publisher',stateHash),{memberId:(await db.query("SELECT id FROM members WHERE clerk_user_id='publisher'")).rows[0].id,codeVerifier,requestCommentScope:false});
     await assert.rejects(consumeOAuthState(db,'publisher',stateHash),/YOUTUBE_OAUTH_STATE_INVALID/);
     await saveYouTubeConnection(db,'publisher',{channelId:'channel123',channelTitle:'Shariy',
       refreshTokenEncrypted:'v1.encrypted.payload',scopes:['youtube.upload','youtube.readonly']});

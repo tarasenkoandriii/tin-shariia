@@ -1,13 +1,13 @@
 # Stage 13 audit — YouTube publishing integration
 
-**Status: partially implemented locally; stage remains open.** The new OAuth/uploader code has not been deployed or exercised against Google. No channel is connected and no private upload has been completed.
+**Status: deployed to Production. Live YouTube acceptance remains open.** No channel is connected and no private upload has been completed.
 
 ## Current production capability
 
 - A publisher can register a YouTube URL after uploading through YouTube Studio. Registration checks the current approved episode, approved media revision, completed video audit and reviewed findings. Duplicate registrations are rejected or returned idempotently.
 - Production stores the YouTube video ID, publication timestamp, frozen editorial snapshot, later metrics and correction history.
 - The read-only Shariy channel catalog is deployed at `/editorial/youtube-channel` and uses the server-only `YOUTUBE_API_KEY` for video metadata and statistics. It is a separate read capability, not a publisher.
-- Production now has the independent sensitive `YOUTUBE_TOKEN_ENCRYPTION_KEY`; `GOOGLE_YOUTUBE_CLIENT_ID` and `GOOGLE_YOUTUBE_CLIENT_SECRET` are still absent. No channel is connected through this app.
+- Production has both Google OAuth credentials and the independent token encryption key as sensitive variables.
 
 ## Local implementation completed
 
@@ -19,12 +19,14 @@
 
 ## Remaining acceptance work
 
-1. Configure Google Cloud Web OAuth: enable YouTube Data API v3 and register this exact callback:
-   `https://tin-shariia.viral4creators.app/api/youtube/oauth/callback`
-2. Add `GOOGLE_YOUTUBE_CLIENT_ID` and `GOOGLE_YOUTUBE_CLIENT_SECRET` as sensitive Vercel Production secrets. The independent 32-byte base64url `YOUTUBE_TOKEN_ENCRYPTION_KEY` has been generated and stored; the Viral4Creators Vercel project has only `YOUTUBE_API_KEY`, so there are no OAuth credentials to copy.
-3. Deploy the code and apply migration `0010_youtube_uploads` to Production.
-4. Connect the owner's channel, choose a specific Shorts revision that has passed exact-file FFmpeg/Gemini review, authorize one private upload, then verify its video ID, processing/playback and private visibility in YouTube Studio/API.
+Production migration `0010_youtube_uploads` was applied. Vercel deployment [4jScywxtk7DKjbv61Lzuzbzv7xAU](https://vercel.com/sibionics-ai/tin-shariia/4jScywxtk7DKjbv61Lzuzbzv7xAU) is READY at commit `acadf3e`. The production connection endpoint returned HTTP 401 without authentication. [CI passed](https://github.com/tarasenkoandriii/tin-shariia/actions/runs/43298650227), including the PostgreSQL workflow check and production build.
 
-Validation on 12 Nov 2026: lint and typecheck pass; production build passes; suite reports 32 passed and 1 skipped locally (native PostgreSQL only). GitHub Actions run [43298650227](https://github.com/tarasenkoandriii/tin-shariia/actions/runs/43298650227) passed, including the separate PostgreSQL workflow check and production build. Commit `77d53ee` is pushed, but the latest Vercel Production deployment is still commit `4b53f7a` (read-only channel catalog); this Stage 13 commit is not deployed. No OAuth connection, channel selection, upload, permission change or paid call has been performed. Until the four acceptance items are complete, closing Stage 13 would overstate readiness.
+Production has zero connected channels and zero ready Shorts with a passed media revision. The publisher must connect the intended channel and approve a reviewed Shorts revision. Acceptance requires one private upload and confirmation of video ID, completed processing, playback and private visibility.
 
 Official protocol references: [YouTube resumable upload](https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol), [videos.insert](https://developers.google.com/youtube/v3/docs/videos/insert), [YouTube OAuth](https://developers.google.com/youtube/v3/guides/authentication).
+
+## Private YouTube Studio check — 2026-11-13
+
+The connected editorial channel is `@ТіньШарія` (`UCqiH2d7WT_POfbRi17KKPfw`). The 1.15× narration cut of «Мідас» і «Карфаген»: дві справи, різні стадії was uploaded manually in YouTube Studio. Studio listed it under Shorts with visibility Private, and it played in the authorized browser. YouTube video ID: `9s2TYleQ7o4`.
+
+This verifies private playback on the intended channel. Stage 13 acceptance still requires a separate approved media revision to pass through the editorial app's OAuth uploader and reconciliation. The manual Studio upload did not exercise that route.

@@ -4,7 +4,7 @@ import { appOrigin } from '../../../../../access/clerk-config';
 import { clerkId } from '../../../../../access/session';
 import { database } from '../../../../../db/runtime.mjs';
 import { consumeOAuthState, getYouTubeConnectionSecret, saveYouTubeConnection } from '../../../../../db/youtube-uploads.mjs';
-import { decryptYouTubeSecret, encryptYouTubeSecret, exchangeYouTubeCode, fetchYouTubeChannel, revokeYouTubeToken, youtubeOAuthConfig } from '../../../../../youtube/oauth.mjs';
+import { decryptYouTubeSecret, encryptYouTubeSecret, exchangeYouTubeCode, fetchYouTubeChannel, revokeYouTubeToken, youtubeOAuthConfig, YOUTUBE_COMMENT_SCOPE, YOUTUBE_SCOPES } from '../../../../../youtube/oauth.mjs';
 
 export const dynamic='force-dynamic';
 
@@ -27,19 +27,21 @@ export async function GET(request:Request){
     const config=youtubeOAuthConfig({...process.env,APP_ORIGIN:origin});
     const db=await database();
     const flow=await consumeOAuthState(db,identity,createHash('sha256').update(state).digest('hex'));
-    const token=await exchangeYouTubeCode({code,codeVerifier:flow.codeVerifier,config});
+    const requiredScopes=flow.requestCommentScope?[...YOUTUBE_SCOPES,YOUTUBE_COMMENT_SCOPE]:YOUTUBE_SCOPES;
+    const token=await exchangeYouTubeCode({code,codeVerifier:flow.codeVerifier,config,requiredScopes});
     const channel=await fetchYouTubeChannel(token.accessToken);
     const current=await getYouTubeConnectionSecret(db,identity);
-    if(current?.refresh_token_encrypted){
-      try{await revokeYouTubeToken(decryptYouTubeSecret(current.refresh_token_encrypted));}catch{/* Local disconnect still proceeds; no provider details are logged. */}
-    }
     await saveYouTubeConnection(db,identity,{channelId:channel.channelId,channelTitle:channel.title,
       refreshTokenEncrypted:encryptYouTubeSecret(token.refreshToken),scopes:token.scopes});
+    if(current?.refresh_token_encrypted){
+      const oldToken=decryptYouTubeSecret(current.refresh_token_encrypted);
+      if(oldToken!==token.refreshToken)try{await revokeYouTubeToken(oldToken);}catch{/* New connection already saved; no provider details are logged. */}
+    }
     return finish(origin,'connected');
   }catch(error){
     const message=(error as Error)?.message;
     const result=message==='FORBIDDEN'?'forbidden':message==='YOUTUBE_OAUTH_NOT_CONFIGURED'||message==='YOUTUBE_TOKEN_ENCRYPTION_NOT_CONFIGURED'
-      ?'not_configured':'connect_failed';
+      ?'not_configured':message==='YOUTUBE_SCOPE_REQUIRED'?'comment_scope_required':'connect_failed';
     return finish(origin,result);
   }
 }

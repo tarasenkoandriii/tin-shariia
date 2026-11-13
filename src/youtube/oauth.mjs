@@ -4,6 +4,7 @@ export const YOUTUBE_SCOPES = [
   'https://www.googleapis.com/auth/youtube.upload',
   'https://www.googleapis.com/auth/youtube.readonly',
 ];
+export const YOUTUBE_COMMENT_SCOPE = 'https://www.googleapis.com/auth/youtube.force-ssl';
 
 const b64url = value => Buffer.from(value).toString('base64url');
 const sha256 = value => createHash('sha256').update(value).digest();
@@ -45,7 +46,7 @@ export function decryptYouTubeSecret(envelope,env=process.env) {
   } catch { throw Error('YOUTUBE_TOKEN_INVALID'); }
 }
 
-export function createYouTubeAuthorization({memberId,origin,clientId}) {
+export function createYouTubeAuthorization({memberId,origin,clientId,includeCommentScope=false}) {
   if(typeof memberId!=='string'||!memberId||typeof origin!=='string'||typeof clientId!=='string'||!clientId) throw Error('INVALID_INPUT');
   const state=b64url(randomBytes(32));
   const codeVerifier=b64url(randomBytes(32));
@@ -56,11 +57,11 @@ export function createYouTubeAuthorization({memberId,origin,clientId}) {
   url.searchParams.set('access_type','offline');
   url.searchParams.set('prompt','consent');
   url.searchParams.set('include_granted_scopes','true');
-  url.searchParams.set('scope',YOUTUBE_SCOPES.join(' '));
+  url.searchParams.set('scope',[...YOUTUBE_SCOPES,...(includeCommentScope?[YOUTUBE_COMMENT_SCOPE]:[])].join(' '));
   url.searchParams.set('state',state);
   url.searchParams.set('code_challenge',b64url(sha256(codeVerifier)));
   url.searchParams.set('code_challenge_method','S256');
-  return {state,stateHash:sha256(state).toString('hex'),codeVerifier,authorizationUrl:url.toString()};
+  return {state,stateHash:sha256(state).toString('hex'),codeVerifier,authorizationUrl:url.toString(),requestCommentScope:includeCommentScope===true};
 }
 
 async function providerJson(response) {
@@ -69,7 +70,7 @@ async function providerJson(response) {
   return body;
 }
 
-export async function exchangeYouTubeCode({code,codeVerifier,config,fetchImpl=fetch}) {
+export async function exchangeYouTubeCode({code,codeVerifier,config,requiredScopes=YOUTUBE_SCOPES,fetchImpl=fetch}) {
   const response=await fetchImpl('https://oauth2.googleapis.com/token',{
     method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:new URLSearchParams({code,code_verifier:codeVerifier,client_id:config.clientId,
@@ -80,7 +81,7 @@ export async function exchangeYouTubeCode({code,codeVerifier,config,fetchImpl=fe
   if(typeof body.access_token!=='string'||typeof body.refresh_token!=='string'
     ||typeof body.scope!=='string'||!Number.isFinite(body.expires_in)) throw Error('YOUTUBE_OAUTH_INCOMPLETE');
   const scopes=body.scope.split(/\s+/).filter(Boolean);
-  if(!YOUTUBE_SCOPES.every(scope=>scopes.includes(scope))) throw Error('YOUTUBE_SCOPE_REQUIRED');
+  if(!requiredScopes.every(scope=>scopes.includes(scope))) throw Error('YOUTUBE_SCOPE_REQUIRED');
   return {accessToken:body.access_token,refreshToken:body.refresh_token,scopes};
 }
 

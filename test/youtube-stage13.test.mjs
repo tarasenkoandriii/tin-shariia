@@ -42,8 +42,8 @@ test('resumable uploads recover accepted byte ranges without blind restart',()=>
 });
 
 test('upload reconciliation verifies both processing and the selected privacy status',()=>{
-  assert.deepEqual(youtubeProcessingOutcome({id:'abcdefghijk',status:{uploadStatus:'processed',privacyStatus:'private'}},'private'),
-    {state:'published',done:true,status:'processed',privacy:'private',errorCode:null});
+  assert.deepEqual(youtubeProcessingOutcome({id:'abcdefghijk',status:{uploadStatus:'processed',privacyStatus:'private',containsSyntheticMedia:true}},'private'),
+    {state:'published',done:true,status:'processed',privacy:'private',containsSyntheticMedia:true,errorCode:null});
   assert.equal(youtubeProcessingOutcome({id:'abcdefghijk',status:{uploadStatus:'processed',privacyStatus:'public'}},'private').errorCode,
     'YOUTUBE_PRIVACY_MISMATCH');
   assert.equal(youtubeProcessingOutcome({id:'abcdefghijk',status:{uploadStatus:'uploaded',privacyStatus:'private'}},'private').done,false);
