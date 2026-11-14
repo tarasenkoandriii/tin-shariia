@@ -70,7 +70,12 @@ export function AnalysisPanel({ videoId, transcripts, canRun }: {videoId:string;
     setPending(true);
     setMessage('');
     try {
-      await data(endpoint,undefined,input);
+      const result=await data<{source?:string;captions?:{language:string;automatic:boolean;segments:number};captionsSkipped?:string}>(endpoint,undefined,input);
+      if(result?.source==='captions'&&result.captions) setMessage(`Узято субтитри YouTube (${result.captions.language}, `
+        +`${result.captions.automatic?'автоматичні':'авторські'}, ${result.captions.segments} фрагментів): Gemini аналізує текст, а не відео. `
+        +'Цитати звіряйте з відео — автоматичні субтитри можуть помилятися.');
+      else if(result?.source==='video'&&result.captionsSkipped&&result.captionsSkipped!=='DISABLED')
+        setMessage('Субтитри YouTube недоступні — Gemini аналізує все відео.');
       setSelected(undefined);
       setJobs(await data<Job[]>(endpoint));
     } catch(error) {
@@ -95,10 +100,12 @@ export function AnalysisPanel({ videoId, transcripts, canRun }: {videoId:string;
     <h2>Аналіз розшифрування</h2>
     {canRun&&<form onSubmit={event=>{
       event.preventDefault();
-      const raw=String(new FormData(event.currentTarget).get('durationSec')??'').trim();
-      void enqueue({source:'youtube',...(raw?{durationSec:Number(raw)}:{})});
+      const form=new FormData(event.currentTarget);
+      const raw=String(form.get('durationSec')??'').trim();
+      void enqueue({source:'youtube',captions:form.has('captions'),...(raw?{durationSec:Number(raw)}:{})});
     }}>
-      <p>Gemini перегляне весь публічний ролик YouTube частинами по 8 хвилин і запропонує перевірювані твердження з таймкодами.</p>
+      <p>Gemini запропонує перевірювані твердження з таймкодами. Якщо YouTube віддає субтитри ролику, аналізується їхній текст — це в десятки разів дешевше. Інакше Gemini перегляне весь ролик частинами по 8 хвилин.</p>
+      <label><input type="checkbox" name="captions" defaultChecked /> Спершу спробувати субтитри YouTube (економія Gemini)</label>
       <label>Тривалість, с (лише якщо YouTube не повернув її сам) <input name="durationSec" type="number" min={10} max={86400} /></label>
       <button disabled={pending}>Проаналізувати весь ролик через Gemini</button>
     </form>}
