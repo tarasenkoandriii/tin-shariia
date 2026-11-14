@@ -7,6 +7,8 @@ import { loadPublications } from '../../../../db/publications.mjs';
 import { PublicationPanel, type Publication } from '../../publication-panel';
 import { AnalysisPanel } from '../../analysis-panel';
 import { CaptionsCheckPanel } from '../../captions-check-panel';
+import { CaptionsBookmarklet } from '../../captions-bookmarklet';
+import { captionsBookmarkletHref } from '../../../../youtube/captions-bookmarklet.mjs';
 import { ScenarioGeminiButton } from '../../scenario-gemini-button';
 import {EpisodeGrokReviewPanel,type EpisodeGrokReview} from '../../episode-grok-review-panel';
 import {listEpisodeGrokReviewsForEpisodes} from '../../../../db/episode-grok.mjs';
@@ -110,6 +112,7 @@ export default async function VideoPage({ params, searchParams }: {
     <section>
       <h2>Розшифрування</h2>
       {author && <TranscriptForm videoId={videoId} />}
+      {author && <CaptionsBookmarklet href={captionsBookmarkletHref()} youtubeId={video.youtube_id} />}
       {transcripts.length ? <ul>{transcripts.map(t=><li key={t.id}>
         <Link href={'?transcript='+t.id}>Версія {t.version} · {t.format.toUpperCase()}</Link>
       </li>)}</ul> : <p>Розшифрувань ще немає.</p>}
