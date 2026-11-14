@@ -54,7 +54,7 @@ test('direct Grok mode is the default, runs immediately and applies the same aut
     assert.equal(first.mode,'direct');
     let calls=0;
     const outcome=await runDirectGrokReviews(db,{id:first.id,limit:1,request:async({system,input})=>{
-      calls++;assert.match(system,/Return JSON only/);assert.match(input,/Script One/);return {text:review(85,90)};
+      calls++;assert.match(system,/Поверни лише JSON/);assert.match(input,/Script One/);return {text:review(85,90)};
     }});
     assert.deepEqual(outcome,{claimed:1,completed:1,failed:0});
     let {rows:[row]}=await db.query('SELECT state,auto_accepted,auto_accept_threshold,result,batch_id FROM episode_grok_reviews WHERE id=$1',[first.id]);
@@ -72,6 +72,10 @@ test('direct Grok mode is the default, runs immediately and applies the same aut
     await runDirectGrokReviews(db,{id:risky.id,request:async()=>({text:review(100,100,['Дата рішення не підтверджена'])})});
     ({rows:[row]}=await db.query('SELECT state,auto_accepted FROM episode_grok_reviews WHERE id=$1',[risky.id]));
     assert.deepEqual([row.state,row.auto_accepted],['succeeded',false]);
+    // Product rule (686ccbc): one score strictly above the threshold is enough; equal to it is not.
+    const either=await queueEpisodeGrokReview(db,'grok-author',episodes[1].id);
+    await runDirectGrokReviews(db,{id:either.id,request:async()=>({text:review(85,40)})});
+    assert.equal((await db.query('SELECT state FROM episode_grok_reviews WHERE id=$1',[either.id])).rows[0].state,'accepted');
 
     // Provider failure releases the reserve and allows a rerun; an uncertain outcome keeps the reserve.
     const third=await queueEpisodeGrokReview(db,'grok-author',episodes[2].id);

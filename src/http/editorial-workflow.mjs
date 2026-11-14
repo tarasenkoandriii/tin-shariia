@@ -1,3 +1,4 @@
+import { logUnexpectedError } from '../access/error-log.mjs';
 import { changeEditorial } from '../db/editorial-workflow.mjs';
 
 const errors = {
@@ -47,6 +48,7 @@ export async function editorialMutation(request, { db, identity, collection, id,
     return Response.json({ data }, { status: input.action === 'create' ? 201 : 200, headers });
   } catch (error) {
     const code = Object.hasOwn(errors, error?.message) ? error.message : 'WORKFLOW_FAILED';
+    if (code === 'WORKFLOW_FAILED') logUnexpectedError('editorial', null, error);
     return reply(errors[code] ?? 500, code);
   }
 }
