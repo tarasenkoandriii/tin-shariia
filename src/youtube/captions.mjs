@@ -3,6 +3,8 @@
 // Unofficial endpoints: YouTube may refuse datacenter IPs or change the format at any time. Every failure
 // returns {ok:false, reason} and the caller falls back to whole-video Gemini analysis. Never throws.
 
+import { captionsFetch } from './proxy.mjs';
+
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 const COOKIE = 'CONSENT=YES+1; SOCS=CAI';
 const preferred = ['ru', 'uk'];
@@ -98,15 +100,26 @@ export function captionsToSrt(segments) {
   return segments.map((segment, i) => `${i + 1}\n${srtTime(segment.startMs)} --> ${srtTime(segment.endMs)}\n${segment.text}`).join('\n\n') + '\n';
 }
 
-async function tracksFromPlayer(fetchImpl, youtubeId) {
+// Innertube clients tried in order. Caption URLs of the WEB client now carry exp=xpe and come back empty
+// without the player's PO token; ANDROID_VR has so far been served captions without one (unverified, best effort).
+export const playerClients = [
+  { name:'ANDROID_VR', id:28, version:'1.65.10',
+    userAgent:'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+    extra:{ deviceMake:'Oculus', deviceModel:'Quest 3', androidSdkVersion:32, osName:'Android', osVersion:'12L' } },
+  { name:'WEB', id:1, version:'2.20261101.00.00', userAgent:UA, extra:{} },
+];
+
+async function tracksFromPlayer(fetchImpl, youtubeId, client = playerClients[1]) {
   const response = await get(fetchImpl, 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
-    method:'POST', headers:{ 'Content-Type':'application/json' },
-    body:JSON.stringify({ videoId:youtubeId, context:{ client:{ clientName:'WEB', clientVersion:'2.20261101.00.00', hl:'ru' } } }),
+    method:'POST', headers:{ 'Content-Type':'application/json', 'User-Agent':client.userAgent,
+      'X-YouTube-Client-Name':String(client.id), 'X-YouTube-Client-Version':client.version },
+    body:JSON.stringify({ videoId:youtubeId, contentCheckOk:true, racyCheckOk:true,
+      context:{ client:{ clientName:client.name, clientVersion:client.version, hl:'ru', gl:'US', ...client.extra } } }),
   });
-  if (!response.ok) return { reason:'PLAYER_HTTP_' + response.status };
+  if (!response.ok) return { reason:client.name + '_HTTP_' + response.status };
   const data = await response.json().catch(() => null);
   const status = data?.playabilityStatus?.status;
-  if (status && status !== 'OK') return { reason:'PLAYER_' + status };
+  if (status && status !== 'OK') return { reason:client.name + '_' + status };
   return { tracks:data?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? null };
 }
 
@@ -132,20 +145,23 @@ async function downloadTrack(fetchImpl, track) {
 }
 
 /** @returns {Promise<{ok:true,language:string,automatic:boolean,segments:object[],srt:string}|{ok:false,reason:string}>} */
-export async function fetchYouTubeCaptions(youtubeId, { fetchImpl = fetch } = {}) {
+export async function fetchYouTubeCaptions(youtubeId, { fetchImpl, env = process.env } = {}) {
   if (!/^[\w-]{11}$/.test(youtubeId ?? '')) return { ok:false, reason:'INVALID_ID' };
+  let via = 'custom';
+  if (!fetchImpl) ({ fetchImpl, via } = captionsFetch(env));
   const reasons = [];
-  for (const source of [tracksFromPlayer, tracksFromWatchPage]) {
+  const sources = [...playerClients.map(client => (f, id) => tracksFromPlayer(f, id, client)), tracksFromWatchPage];
+  for (const source of sources) {
     try {
       const found = await source(fetchImpl, youtubeId);
       const track = pickCaptionTrack(found.tracks);
       if (!track) { reasons.push(found.reason ?? (found.tracks ? 'NO_USABLE_TRACK' : 'NO_TRACKS')); continue; }
       const segments = mergeCaptionCues(await downloadTrack(fetchImpl, track));
       if (segments.length < 3) { reasons.push('EMPTY_TRACK'); continue; }
-      return { ok:true, language:track.languageCode, automatic:track.kind === 'asr', segments, srt:captionsToSrt(segments) };
+      return { ok:true, language:track.languageCode, automatic:track.kind === 'asr', segments, srt:captionsToSrt(segments), via };
     } catch (error) {
       reasons.push(error?.name === 'TimeoutError' ? 'TIMEOUT' : 'FETCH_FAILED');
     }
   }
-  return { ok:false, reason:reasons.join(',') || 'UNAVAILABLE' };
+  return { ok:false, reason:reasons.join(',') || 'UNAVAILABLE', via };
 }

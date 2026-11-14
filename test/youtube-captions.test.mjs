@@ -5,6 +5,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {database} from '../src/db/runtime.mjs';
 import {registerVideo} from '../src/db/editorial-import.mjs';
 import {enqueueYouTubePreferCaptions} from '../src/analysis/queue.mjs';
+import {captionsFetch,captionsProxyUrl,isProxyFailure,proxyHostForDisplay,webshareProxyUrl} from '../src/youtube/proxy.mjs';
 import {captionTracksFromHtml,captionsToSrt,fetchYouTubeCaptions,mergeCaptionCues,parseCaptionPayload,pickCaptionTrack} from '../src/youtube/captions.mjs';
 import {parseTranscript} from '../src/editorial/transcript.mjs';
 
@@ -45,6 +46,13 @@ test('fetchYouTubeCaptions uses the player API, falls back to the watch page and
   assert.equal(ok.ok,true);
   assert.deepEqual([ok.language,ok.automatic,ok.segments.length],['ru',true,4]);
   assert.deepEqual(calls,['POST /youtubei/v1/player ','GET /api/timedtext json3']);
+  const clientNames=[];
+  await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async(url,init)=>{
+    if(String(url).includes('/youtubei/v1/player')){clientNames.push(JSON.parse(init.body).context.client.clientName+'/'+init.headers['X-YouTube-Client-Name']);
+      return Response.json({playabilityStatus:{status:clientNames.length===1?'LOGIN_REQUIRED':'OK'},captions:{playerCaptionsTracklistRenderer:{captionTracks:[track]}}});}
+    return new Response(json3(lines));
+  }});
+  assert.deepEqual(clientNames,['ANDROID_VR/28','WEB/1']);
   // Bot check on the player API → watch page; empty json3 → default XML format.
   const fallback=await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async url=>{
     const u=new URL(url);
@@ -57,8 +65,8 @@ test('fetchYouTubeCaptions uses the player API, falls back to the watch page and
   assert.equal(fallback.segments.length,4);
   const blocked=await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async url=>new URL(url).pathname==='/youtubei/v1/player'
     ?Response.json({playabilityStatus:{status:'LOGIN_REQUIRED'}}):new Response('<form action="https://consent.youtube.com/save">')});
-  assert.deepEqual(blocked,{ok:false,reason:'PLAYER_LOGIN_REQUIRED,WATCH_CONSENT'});
-  assert.deepEqual(await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async()=>{throw new TypeError('network');}}),{ok:false,reason:'FETCH_FAILED,FETCH_FAILED'});
+  assert.deepEqual(blocked,{ok:false,reason:'ANDROID_VR_LOGIN_REQUIRED,WEB_LOGIN_REQUIRED,WATCH_CONSENT',via:'custom'});
+  assert.deepEqual(await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async()=>{throw new TypeError('network');}}),{ok:false,reason:'FETCH_FAILED,FETCH_FAILED,FETCH_FAILED',via:'custom'});
   assert.deepEqual(await fetchYouTubeCaptions('bad id'),{ok:false,reason:'INVALID_ID'});
   // A track URL pointing off YouTube is never fetched.
   const offsite=await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async url=>{
@@ -116,4 +124,39 @@ test('whole-video request uses YouTube captions first and falls back to video wi
     assert.equal(disabled.captionsSkipped,'DISABLED');
     assert.equal(asked,before);
   }finally{await db.close?.();}
+});
+
+test('captions proxy: Webshare URL like roadscout, full URL wins, falls back direct only when the proxy is down',async()=>{
+  assert.equal(webshareProxyUrl({}),null);
+  assert.equal(webshareProxyUrl({WEBSHARE_PROXY_USERNAME:'user',WEBSHARE_PROXY_PASSWORD:'p@ss',WEBSHARE_PROXY_COUNTRY:'DE'}),
+    'http://user-de-rotate:p%40ss@p.webshare.io:80');
+  assert.equal(webshareProxyUrl({WEBSHARE_PROXY_USERNAME:'u',WEBSHARE_PROXY_PASSWORD:'p',WEBSHARE_PROXY_ROTATE:'false',WEBSHARE_PROXY_HOST:'h',WEBSHARE_PROXY_PORT:'8080'}),'http://u:p@h:8080');
+  assert.equal(captionsProxyUrl({YOUTUBE_CAPTIONS_PROXY_URL:'http://a:b@proxy.example:3128',WEBSHARE_PROXY_USERNAME:'u',WEBSHARE_PROXY_PASSWORD:'p'}),'http://a:b@proxy.example:3128');
+  assert.equal(captionsProxyUrl({HTTPS_PROXY:'http://corp:1'}),null,'HTTPS_PROXY must not reroute captions implicitly');
+  assert.equal(proxyHostForDisplay('http://a:secret@proxy.example:3128'),'proxy.example:3128');
+  assert.equal(captionsFetch({}).via,'direct');
+
+  const env={YOUTUBE_CAPTIONS_PROXY_URL:'http://a:secret@proxy.example:3128'};
+  let proxied=0,direct=0,agentUrl;
+  const deps=failing=>({makeAgent:url=>{agentUrl=url;return {proxy:true};},
+    proxiedFetch:async(url,init)=>{proxied++;assert.deepEqual(init.dispatcher,{proxy:true});if(failing)throw failing;return new Response('via proxy');},
+    baseFetch:async()=>{direct++;return new Response('direct');}});
+  const ok=captionsFetch(env,deps(null));
+  assert.equal(ok.via,'proxy proxy.example:3128');
+  assert.equal(await (await ok.fetchImpl('https://www.youtube.com/x')).text(),'via proxy');
+  assert.equal(agentUrl,env.YOUTUBE_CAPTIONS_PROXY_URL);
+  const warn=console.warn;const warnings=[];console.warn=(...a)=>warnings.push(JSON.stringify(a));
+  try{
+    const down=captionsFetch({YOUTUBE_CAPTIONS_PROXY_URL:'http://a:secret@other.example:1'},deps(Object.assign(new TypeError('fetch failed'),{cause:{code:'ECONNREFUSED'}})));
+    assert.equal(await (await down.fetchImpl('https://www.youtube.com/x')).text(),'direct');
+    assert.equal(direct,1);
+    // YouTube's own refusal through a working proxy is not retried directly.
+    const refused=captionsFetch({YOUTUBE_CAPTIONS_PROXY_URL:'http://a:secret@third.example:1'},deps(new Error('aborted')));
+    await assert.rejects(refused.fetchImpl('https://www.youtube.com/x'),/aborted/);
+    assert.equal(direct,1);
+  }finally{console.warn=warn;}
+  assert.ok(warnings.length===1&&!warnings[0].includes('secret'));
+  assert.equal(isProxyFailure({message:'Proxy response (407) !== 200 when HTTP Tunneling'}),true);
+  assert.equal(isProxyFailure(new Error('HTTP 429')),false);
+  assert.equal(proxied,3);
 });

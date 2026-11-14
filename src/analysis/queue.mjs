@@ -76,7 +76,7 @@ export async function enqueueYouTubePreferCaptions(db,identity,videoId,input,con
     try{
       const transcript=await importTranscript(db,{videoId,bytes:Buffer.from(found.srt,'utf8'),format:'srt'});
       const job=await enqueueAnalysis(db,identity,videoId,{transcriptId:transcript.id},config);
-      console.info('YOUTUBE_CAPTIONS_USED',{language:found.language,automatic:found.automatic,segments:found.segments.length});
+      console.info('YOUTUBE_CAPTIONS_USED',{language:found.language,automatic:found.automatic,segments:found.segments.length,via:found.via??null});
       return {...job,source:'captions',transcriptId:transcript.id,
         captions:{language:found.language,automatic:found.automatic,segments:found.segments.length}};
     }catch(error){
@@ -86,7 +86,7 @@ export async function enqueueYouTubePreferCaptions(db,identity,videoId,input,con
       found={ok:false,reason:'IMPORT_'+error.message};
     }
   }
-  console.info('YOUTUBE_CAPTIONS_SKIPPED',{reason:String(found.reason).slice(0,120)});
+  console.info('YOUTUBE_CAPTIONS_SKIPPED',{reason:String(found.reason).slice(0,200),via:found.via??null});
   return {...await video(),source:'video',captionsSkipped:found.reason};
 }
 
