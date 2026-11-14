@@ -175,19 +175,33 @@ export async function loadYouTubeUploadForShort(db,identity,episodeId,shortId){
   return row;
 }
 
-export async function patchYouTubeUpload(db,id,values){
+const FINAL_STATES=['published','failed'];
+
+/**
+ * Writes worker progress. With a run token the write happens only while this worker still owns the lease;
+ * a row in a final state is never changed unless the caller is an explicit recovery path (values.allowFinal).
+ * Returns null and writes nothing when the lease was lost or the row is final. Never touches run_lease/run_token.
+ * @param {string|null} [token]
+ */
+export async function patchYouTubeUpload(db,id,values,token=values.token??null){
+  const allowFinal=values.allowFinal===true;
   return db.transaction(async tx=>{
     const uploadId=uuid(id);
-    const {rows:[before]}=await tx.query('SELECT state,upload_offset FROM youtube_short_uploads WHERE id=$1 FOR UPDATE',[uploadId]);
-    if(!before)return null;
+    const {rows:[before]}=await tx.query(`SELECT state,upload_offset FROM youtube_short_uploads
+      WHERE id=$1 AND ($2::uuid IS NULL OR run_token=$2::uuid) FOR UPDATE`,[uploadId,token]);
+    if(!before||FINAL_STATES.includes(before.state)&&!allowFinal)return null;
     const {rows:[row]}=await tx.query(`UPDATE youtube_short_uploads SET
       state=COALESCE($2,state),upload_uri_encrypted=COALESCE($3,upload_uri_encrypted),
       upload_offset=COALESCE($4,upload_offset),youtube_id=COALESCE($5,youtube_id),
       processing_status=COALESCE($6,processing_status),actual_privacy_status=COALESCE($7,actual_privacy_status),
       actual_contains_synthetic_media=COALESCE($8,actual_contains_synthetic_media),
-      error_code=$9,run_lease=$10,updated_at=now() WHERE id=$1 RETURNING state,upload_offset,youtube_id,processing_status,actual_privacy_status,actual_contains_synthetic_media`,
+      error_code=$9,updated_at=now()
+      WHERE id=$1 AND ($10::uuid IS NULL OR run_token=$10::uuid) AND (state NOT IN ('published','failed') OR $11::boolean)
+      RETURNING state,upload_offset,youtube_id,processing_status,actual_privacy_status,actual_contains_synthetic_media`,
     [uploadId,values.state??null,values.uploadUriEncrypted??null,values.offset??null,values.youtubeId??null,
-      values.processingStatus??null,values.actualPrivacyStatus??null,values.actualContainsSyntheticMedia??null,values.errorCode??null,values.lease??null]);
+      values.processingStatus??null,values.actualPrivacyStatus??null,values.actualContainsSyntheticMedia??null,values.errorCode??null,
+      token,allowFinal]);
+    if(!row)return null;
     if(before.state!==row.state||Number(before.upload_offset)!==Number(row.upload_offset)){
       const action=row.state==='uploading'?(before.state==='queued'?'session_started':'chunk_accepted'):
         row.state==='processing'?'processing':row.state==='published'?'published':row.state==='failed'?'failed':row.state==='unknown'?'unknown':null;
@@ -203,15 +217,19 @@ export async function claimYouTubeUpload(db,id){
   return db.transaction(async tx=>{
     const {rows:[row]}=await tx.query(`SELECT state,run_lease FROM youtube_short_uploads WHERE id=$1 FOR UPDATE`,[uuid(id)]);
     if(!row) throw Error('NOT_FOUND');
-    if(['published','failed'].includes(row.state)) return {done:true,state:row.state};
+    if(FINAL_STATES.includes(row.state)) return {done:true,state:row.state};
     if(row.run_lease&&new Date(row.run_lease)>new Date()) return {busy:true};
-    await tx.query(`UPDATE youtube_short_uploads SET run_lease=now()+interval '90 seconds',updated_at=now()
-      WHERE id=$1`,[uuid(id)]);
-    return {done:false};
+    const token=randomUUID();
+    await tx.query(`UPDATE youtube_short_uploads SET run_lease=now()+interval '120 seconds',run_token=$2,updated_at=now()
+      WHERE id=$1`,[uuid(id),token]);
+    return {done:false,token};
   });
 }
 
-export async function releaseYouTubeUploadLease(db,id){
-  await db.query('UPDATE youtube_short_uploads SET run_lease=NULL,updated_at=now() WHERE id=$1',[uuid(id)]);
+/** Clears the lease only for its owner; a foreign or missing token changes nothing. */
+export async function releaseYouTubeUploadLease(db,id,token){
+  if(typeof token!=='string'||!token)return false;
+  const {rows}=await db.query(`UPDATE youtube_short_uploads SET run_lease=NULL,run_token=NULL,updated_at=now()
+    WHERE id=$1 AND run_token=$2::uuid RETURNING id`,[uuid(id),uuid(token)]);
+  return rows.length>0;
 }
-
