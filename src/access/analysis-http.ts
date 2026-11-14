@@ -1,5 +1,6 @@
 import { appOrigin } from './clerk-config';
 import { clerkId } from './session';
+import { logUnexpectedError } from './error-log.mjs';
 
 const status: Record<string,number> = {
   AUTH_REQUIRED:401, FORBIDDEN:403, ORIGIN_DENIED:403, NOT_FOUND:404,
@@ -7,13 +8,18 @@ const status: Record<string,number> = {
   INVALID_INPUT:422, TRANSCRIPT_REQUIRED:422, TRANSCRIPT_TOO_LARGE:422, SEGMENT_TOO_LARGE:422,
   YOUTUBE_DURATION_REQUIRED:422, YOUTUBE_VIDEO_TOO_LONG:422, INVALID_YOUTUBE_URL:422, ANALYSIS_NOT_READY:409, REVISION_CONFLICT:409,
   BUDGET_EXHAUSTED:429, CONCURRENCY_LIMIT:429, ANALYSIS_DISABLED:503,
+  EMPTY_TRANSCRIPT:422, INVALID_TRANSCRIPT:422, INVALID_CUE:422, INVALID_CUE_INTERVAL:422, INVALID_TIMECODE:422,
+  INVALID_UTF8:422, INVALID_VTT_HEADER:422, UNSUPPORTED_FORMAT:422, VIDEO_NOT_FOUND:404,
+  YOUTUBE_API_NOT_CONFIGURED:503, YOUTUBE_UPSTREAM_ERROR:502,
 };
 export function analysisResponse(data: unknown, code=200) {
   return Response.json({data},{status:code,headers:{'Cache-Control':'private, no-store'}});
 }
 export function analysisError(error: unknown) {
   const code=error instanceof Error&&Object.hasOwn(status,error.message)?error.message:'ANALYSIS_FAILED';
-  return Response.json({error:{code,requestId:crypto.randomUUID()}},
+  const requestId=crypto.randomUUID();
+  if(code==='ANALYSIS_FAILED') logUnexpectedError('analysis',requestId,error);
+  return Response.json({error:{code,requestId}},
     {status:status[code]??500,headers:{'Cache-Control':'private, no-store'}});
 }
 export async function analysisIdentity(request?: Request) {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { appOrigin } from './clerk-config';
 import { clerkId } from './session';
+import { logUnexpectedError } from './error-log.mjs';
 
 export const privateHeaders = { 'Cache-Control':'private, no-store', 'X-Content-Type-Options':'nosniff' };
 const statuses: Record<string,number> = {
@@ -49,6 +50,18 @@ const statuses: Record<string,number> = {
   TIKTOK_DISCLOSURE_REQUIRED:409, TIKTOK_PACKAGE_REQUIRED:409, TIKTOK_PUBLICATION_CONFLICT:409, TIKTOK_INVALID_URL:422,
   SONIOX_DISABLED:503, SONIOX_AUDIO_INVALID:422, SONIOX_DUPLICATE:409,
   SONIOX_QUOTA:429, SONIOX_PROVIDER_ERROR:502, SONIOX_PROVIDER_TIMEOUT:504,
+  GROK_NOT_CONFIGURED:503, SHORTS_INVALID_SUBTITLES:422, SHORTS_INVALID_STAMP:422, SHORTS_TECH_CHECK_REJECTED:422,
+  VIDEO_NOT_FOUND:404, ANALYSIS_NOT_READY:409,
+  YOUTUBE_TOKEN_REFRESH_REVOKED:409, YOUTUBE_TOKEN_REFRESH_FAILED:502, YOUTUBE_TOKEN_REFRESH_CLIENT:503,
+  YOUTUBE_TOKEN_INVALID:409, YOUTUBE_SCOPE_REQUIRED:409, YOUTUBE_PROVIDER_ERROR:502, YOUTUBE_REVOKE_FAILED:502,
+  YOUTUBE_CHANNEL_NOT_FOUND:404, YOUTUBE_OAUTH_INCOMPLETE:502, YOUTUBE_API_NOT_CONFIGURED:503,
+  YOUTUBE_UPSTREAM_ERROR:502, INVALID_PAGE_TOKEN:422, YOUTUBE_STATS_UNAVAILABLE:503,
+  MONTAGE_FFMPEG_UNAVAILABLE:503, MONTAGE_FFMPEG_REJECTED:502, MONTAGE_INVALID_MEDIA:422, MONTAGE_REPORT_INVALID:502,
+  MONTAGE_AUDIO_SILENT:422, MONTAGE_AUDIO_INCOMPLETE:422,
+  VIDEO_COVERAGE_INCOMPLETE:502, VIDEO_EDITING_SCORE_MISSING:502, VIDEO_FINDING_INVALID:502, VIDEO_INPUT_UNCONFIRMED:502,
+  INVALID_MEDIA_GRANT:403, INVALID_AUDIT_SOURCE:422,
+  EMPTY_TRANSCRIPT:422, INVALID_TRANSCRIPT:422, INVALID_CUE:422, INVALID_CUE_INTERVAL:422, INVALID_TIMECODE:422,
+  INVALID_UTF8:422, INVALID_VTT_HEADER:422, UNSUPPORTED_FORMAT:422, INVALID_YOUTUBE_URL:422,
   INVALID_INPUT:422, PACKAGE_TOO_LARGE:413, BODY_TOO_LARGE:413,
 };
 
@@ -58,7 +71,9 @@ export function publicationReply(data: unknown, status=200) {
 
 export function publicationError(error: unknown) {
   const code=error instanceof Error&&Object.hasOwn(statuses,error.message)?error.message:'PUBLICATION_FAILED';
-  return Response.json({error:{code,requestId:randomUUID()}},{status:statuses[code]??500,headers:privateHeaders});
+  const requestId=randomUUID();
+  if(code==='PUBLICATION_FAILED') logUnexpectedError('publication',requestId,error);
+  return Response.json({error:{code,requestId}},{status:statuses[code]??500,headers:privateHeaders});
 }
 
 export async function publicationIdentity(request?: Request) {

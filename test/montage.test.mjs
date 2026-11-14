@@ -39,7 +39,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
   const native=process.env.RUN_EDITORIAL_POSTGRES_TESTS==='1';
   const db=native?await database():new PGlite();
   try{
-    if(!native) for(const name of ['0000_editorial_import','0001_editorial_access','0002_editorial_workflow','0003_analysis_queue','0004_publication_records','0005_episode_media','0006_video_audits','0007_video_release_approval','0008_shorts','0009_shorts_audit','0010_youtube_uploads','0011_youtube_short_proposals','0012_soniox_requests','0013_ai_disclosures','0014_publication_insights','0015_youtube_comment_campaign','0016_montage_plan_library','0017_tiktok_manual_publications','0018_grok_direct_mode','0019_youtube_full_analysis']){
+    if(!native) for(const {tag:name} of JSON.parse(await readFile(new URL('../drizzle/meta/_journal.json',import.meta.url),'utf8')).entries){
       await db.exec(await readFile(new URL('../drizzle/'+name+'.sql',import.meta.url),'utf8'));
     }
     for(const [id,roles] of [['media-author',['author']],['media-review',['factchecker','editor']],['media-publisher',['publisher']],['other-author',['author']]]){
@@ -120,6 +120,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
       assert.equal(input.durationMs,41_000);
       if(!state){shortProviderCalls++;return {type:'waiting',delay:0,state:{interactionId:'short-audit'}};}
       const report={audioAvailable:true,visualAvailable:true,summary:'Short test',
+        editingQuality:{score:72,rationale:'Темп рівний, перехід на 00:01 різкий.'},
         coverage:[{interval:0,audio:'Голос чіткий',visual:'Вертикальне відео'}],findings:[]};
       return {type:'success',drafts:validateVideoAudit(report,input,[{modality:'video',tokens:20}]),usage:{input:30,output:10}};
     };
@@ -183,6 +184,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
       }
       assert.equal(state.interactionId,'test-interaction');
       const output={audioAvailable:true,visualAvailable:true,summary:'Test',
+        editingQuality:{score:64,rationale:'Пауза на 00:01 затягнута.'},
         coverage:[{interval:0,audio:'Speech',visual:'Blue screen'}],findings:[{
           category:'speech',severity:'major',startMs:0,endMs:1000,field:null,sourceIndex:null,
           observation:'Test finding',fix:'Adjust the first phrase',
@@ -190,6 +192,7 @@ test('montage binds to approved snapshot and recovers ambiguous FFmpeg submissio
       const modalities=[{modality:'video',tokens:100}];
       assert.throws(()=>validateVideoAudit({...output,coverage:[{...output.coverage[0],interval:1}]},input,modalities),/VIDEO_COVERAGE_INCOMPLETE/);
       assert.throws(()=>validateVideoAudit({...output,audioAvailable:false},input,modalities),/VIDEO_INPUT_UNCONFIRMED/);
+      assert.throws(()=>validateVideoAudit({...output,editingQuality:undefined},input,modalities),/VIDEO_EDITING_SCORE_MISSING/);
       return {type:'success',drafts:validateVideoAudit(output,input,modalities),usage:{input:100,output:20}};
     };
     for(let step=0;step<3;step++) await processAnalysisStep(db,job.id,1,provider);
