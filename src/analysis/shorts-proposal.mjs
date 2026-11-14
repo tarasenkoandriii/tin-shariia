@@ -1,6 +1,7 @@
 import {GoogleGenAI} from '@google/genai';
 import {z} from 'zod';
 import {validateShortsManifest} from '../media/shorts-manifest.mjs';
+import {youtubeFps} from './youtube-full.mjs';
 
 const planSchema=z.object({hook:z.string().min(1).max(160),title:z.string().min(1).max(100),description:z.string().min(1).max(2000),
   clips:z.array(z.object({startMs:z.number().int().nonnegative(),endMs:z.number().int().positive(),reason:z.string().min(1).max(400)})).min(1).max(8)});
@@ -63,7 +64,7 @@ export async function suggestYouTubeShort(source,config){
     model:config.model,
     contents:[{role:'user',parts:[
       {fileData:{fileUri:source.url},videoMetadata:{startOffset:source.start+'s',
-        endOffset:(source.start+youtubeWindowSeconds)+'s',fps:1}},
+        endOffset:(source.start+youtubeWindowSeconds)+'s',fps:youtubeFps()}},
       {text:`Запропонуй план одного редакційного Shorts за цим фрагментом. Поверни JSON: {"plan":{"hook":"…","title":"…","description":"…","clips":[{"startMs":0,"endMs":30000,"reason":"…"}]}}. Числа наведено як приклад. Якщо немає самодостатніх реплік, поверни {}.
 Якщо є план, додай на верхньому рівні narrationUk: до 650 символів українською для диктора. Виділи один прийом автора (узагальнення, підміна понять, вирваний контекст або припущення), лише якщо він чутний у фрагменті. Атрибутуй твердження й не вигадуй спростування.
 Час startMs і endMs відраховуй від початку переданого фрагмента (0 мс). Використовуй тільки почуті завершені репліки.
