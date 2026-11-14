@@ -8,6 +8,13 @@ import sharp from 'sharp';
 import {ffmpegMontage,shortsOutput,validateShortTechnicalReport} from '../src/media/montage-ffmpeg.mjs';
 import {shortsRenderJob,validateShortsManifest} from '../src/media/shorts-manifest.mjs';
 import {renderShortStamp} from '../src/media/shorts-stamp.mjs';
+import {readFile,readdir} from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+import {montageSubtitleTranscript,suggestShorts} from '../src/analysis/shorts-proposal.mjs';
+import {reserveShortsProposal} from '../src/db/shorts.mjs';
+import {initMontage} from '../src/db/montage.mjs';
+import {changeEditorial} from '../src/db/editorial-workflow.mjs';
+import {registerVideo} from '../src/db/editorial-import.mjs';
 
 const manifest={hook:'Короткий хук',title:'Перевірка',description:'Короткий опис',clips:[
   {startMs:1000,endMs:16000},{startMs:30000,endMs:46000},
@@ -159,4 +166,113 @@ test('Shorts download accepts a response without Content-Length (chunked transfe
     globalThis.fetch=async()=>new Response(body,{status:200,headers:{'content-length':String(body.length+5)}});
     await assert.rejects(ffmpegMontage(env).shortFile(job),error=>error.detail?.check==='size_mismatch'&&error.detail.length===body.length+5);
   }finally{globalThis.fetch=original;}
+});
+
+const srtTime=ms=>{
+  const pad=(value,size=2)=>String(value).padStart(size,'0');
+  return `${pad(Math.floor(ms/3_600_000))}:${pad(Math.floor(ms/60_000)%60)}:${pad(Math.floor(ms/1000)%60)},${pad(ms%1000,3)}`;
+};
+const montageCues=[[0,10_000],[10_000,20_000],[20_000,31_000],[31_000,45_000],[45_000,59_000]];
+const montageSrt=montageCues.map(([start,end],i)=>`${i+1}\n${srtTime(start)} --> ${srtTime(end)}\nРепліка монтажу ${i+1}`).join('\n\n');
+const planConfig={model:'gemini-test',inputRate:1,outputRate:2,monthlyMicros:1_000_000_000};
+const geminiReturning=(clips,seen=[])=>({models:{generateContent:async request=>{
+  seen.push(request.contents[0].parts[0].text);
+  return {text:JSON.stringify({hook:'Хук',title:'Назва',description:'Опис',
+    clips:clips.map(([startMs,endMs])=>({startMs,endMs,reason:'Причина'}))}),
+  usageMetadata:{promptTokenCount:100,candidatesTokenCount:50}};
+}}});
+const montageContext=()=>({durationMs:60_000,episode:{title:'Випуск'},claim:{quote:'Цитата'},
+  transcript:montageSubtitleTranscript(montageSrt,60_000),montagePlan:{spec:{format:'9:16'}}});
+
+test('montage SRT subtitles become the Shorts plan timeline; missing or overlong ones are rejected',()=>{
+  const transcript=montageSubtitleTranscript(montageSrt,60_000);
+  assert.deepEqual(transcript.map(row=>[row.s,row.e]),montageCues);
+  assert.equal(transcript[0].t,'Репліка монтажу 1');
+  for(const value of [undefined,'','  ','not an srt','1\n00:00:00,000 --> 00:00:00,000\nПорожньо'])
+    assert.throws(()=>montageSubtitleTranscript(value,60_000),/SHORTS_MONTAGE_SUBTITLES_REQUIRED/);
+  const overlong=montageSrt+'\n\n6\n00:00:59,000 --> 00:01:02,500\nЗа межами монтажу';
+  assert.throws(()=>montageSubtitleTranscript(overlong,60_000),/SHORTS_MONTAGE_SUBTITLES_REQUIRED/);
+  const slight=montageSrt+'\n\n6\n00:00:59,000 --> 00:01:01,500\nТрохи довше';
+  assert.equal(montageSubtitleTranscript(slight,60_000).at(-1).e,60_000);
+});
+
+test('Shorts plan prompt states the montage timeline and accepts clips aligned to its subtitles',async()=>{
+  const seen=[];
+  const result=await suggestShorts(montageContext(),planConfig,{client:geminiReturning([[0,31_000],[45_000,59_000]],seen)});
+  assert.deepEqual(result.manifest.clips,[{startMs:0,endMs:31_000},{startMs:45_000,endMs:59_000}]);
+  assert.match(seen[0],/мілісекунди змонтованого MP4 випуску \(монтажу\), від 0 до 60000 мс/);
+  assert.match(seen[0],/Тривалість монтажу: 60000 мс/);
+  assert.doesNotMatch(seen[0],/початкового MP4|Тривалість джерела/);
+  const nearBoundary=await suggestShorts(montageContext(),planConfig,{client:geminiReturning([[400,30_600]])});
+  assert.deepEqual(nearBoundary.manifest.clips,[{startMs:400,endMs:30_600}]);
+});
+
+test('Shorts plan rejects clips beyond the montage, off subtitle boundaries or overlapping',async()=>{
+  const reject=(clips,code)=>assert.rejects(suggestShorts(montageContext(),planConfig,{client:geminiReturning(clips)}),
+    error=>error.message===code&&error.usage?.input===100);
+  await reject([[20_000,61_000]],'SHORTS_INVALID_CLIP');
+  await reject([[1_000,31_000]],'SHORTS_PLAN_UNSUPPORTED_TIME');
+  await reject([[0,31_600]],'SHORTS_PLAN_UNSUPPORTED_TIME');
+  await reject([[0,31_000],[20_000,45_000]],'SHORTS_INVALID_CLIP');
+  await assert.rejects(suggestShorts({...montageContext(),transcript:[]},planConfig,{client:geminiReturning([[0,31_000]])}),
+    /SHORTS_MONTAGE_SUBTITLES_REQUIRED/);
+});
+
+test('Shorts plan reservation uses the montage subtitles and ignores the source transcript',async()=>{
+  const db=new PGlite();
+  try{
+    for(const name of (await readdir(new URL('../drizzle/',import.meta.url))).filter(file=>file.endsWith('.sql')).sort())
+      await db.exec(await readFile(new URL('../drizzle/'+name,import.meta.url),'utf8'));
+    for(const [id,roles] of [['shorts-author',['author']],['shorts-review',['factchecker','editor']]]){
+      const {rows:[member]}=await db.query('INSERT INTO members (clerk_user_id,email) VALUES ($1,$2) RETURNING id',[id,id+'@example.test']);
+      await db.query('INSERT INTO member_roles SELECT $1,unnest($2::text[])',[member.id,roles]);
+    }
+    const video=await registerVideo(db,'https://youtu.be/QAshorts001');
+    const change=(identity,kind,action,item,extra={})=>changeEditorial(db,identity,kind,{
+      ...extra,action,id:item?.id,version:item?.version,expectedRevision:item?.revision,
+    });
+    let claim=await change('shorts-author','claim','create',null,{
+      parentId:video.id,quote:'Quote',question:'Question?',verdict:'confirmed',explanation:'Test',
+      evidence:[{title:'Report',url:'https://example.test/shorts',accessedOn:'2026-11-12',locator:'1',coverage:'Fact'}],
+    });
+    const {rows:[transcript]}=await db.query(`INSERT INTO transcripts(video_id,version,format,content_hash)
+      VALUES($1,1,'srt',$2) RETURNING id`,[video.id,'b'.repeat(64)]);
+    await db.query(`INSERT INTO transcript_segments(transcript_id,position,start_ms,end_ms,body)
+      VALUES($1,0,100000,140000,'SOURCE-ONLY'),($1,1,140000,190000,'SOURCE-ONLY-2')`,[transcript.id]);
+    await db.query('UPDATE claim_versions SET transcript_id=$1 WHERE claim_id=$2',[transcript.id,claim.id]);
+    claim=await change('shorts-author','claim','submit',claim);
+    claim=await change('shorts-review','claim','approve',claim);
+    const prepare=async subtitles=>{
+      let episode=await change('shorts-author','episode','create',null,{
+        parentId:claim.id,claimVersion:claim.version,title:'Master',script:'Script',...(subtitles?{subtitles}:{}),
+      });
+      episode=await change('shorts-author','episode','submit',episode);
+      episode=await change('shorts-review','episode','approve',episode);
+      await db.query(`INSERT INTO episode_grok_reviews(episode_id,episode_version,round,state,batch_request_id,input_snapshot,accepted_by,accepted_at)
+        VALUES($1,$2,1,'accepted',gen_random_uuid(),'{}'::jsonb,(SELECT id FROM members WHERE clerk_user_id='shorts-review'),now())`,
+      [episode.id,episode.version]);
+      const media=await initMontage(db,'shorts-author',episode.id,{version:episode.version,bytes:600});
+      await db.query(`UPDATE episode_media_revisions SET state='passed',sha256=$2,report='{"durationMs":60000}'::jsonb WHERE id=$1`,
+        [media.id,'a'.repeat(64)]);
+      return {episode,media};
+    };
+    const withSubtitles=await prepare(montageSrt);
+    const reservation=await reserveShortsProposal(db,'shorts-author',withSubtitles.episode.id,
+      {mediaId:withSubtitles.media.id,requestId:'0f4d5d4e-6a4b-4f62-9a1c-3a9f5f3c0001'},planConfig);
+    assert.equal(reservation.cached,false);
+    assert.equal(reservation.context.durationMs,60_000);
+    assert.deepEqual(reservation.context.transcript.map(row=>[row.s,row.e]),montageCues);
+    assert.equal(reservation.context.episode.subtitles,undefined);
+    assert.doesNotMatch(JSON.stringify(reservation.context),/SOURCE-ONLY/);
+    const seen=[];
+    await suggestShorts(reservation.context,planConfig,{client:geminiReturning([[0,31_000]],seen)});
+    assert.doesNotMatch(seen[0],/SOURCE-ONLY/);
+    assert.match(seen[0],/Репліка монтажу 3/);
+
+    const without=await prepare(null);
+    await assert.rejects(reserveShortsProposal(db,'shorts-author',without.episode.id,
+      {mediaId:without.media.id,requestId:'0f4d5d4e-6a4b-4f62-9a1c-3a9f5f3c0002'},planConfig),/SHORTS_MONTAGE_SUBTITLES_REQUIRED/);
+    const {rows:calls}=await db.query('SELECT media_revision_id FROM shorts_plan_calls');
+    assert.deepEqual(calls.map(row=>row.media_revision_id),[withSubtitles.media.id]);
+  }finally{await db.close();}
 });

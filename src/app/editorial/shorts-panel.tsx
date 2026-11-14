@@ -85,7 +85,9 @@ export function ShortsPanel({episode,sources,items,plans,canCreate,canReview,can
       (form.elements.namedItem('clips') as HTMLInputElement).value=result.manifest.clips
         .map(clip=>`${seconds(clip.startMs)}-${seconds(clip.endMs)}`).join(', ');
       setSuggestion(`Gemini використав «${plan.name}», версія ${plan.version} (${(result.spentMicros/1_000_000).toFixed(4)} $). Перевірте пропозицію й за потреби змініть її до пробного рендеру.`);
-    }catch{setMessage('Gemini не повернув перевірену пропозицію. Спробуйте пізніше або відредагуйте фрагменти вручну.');}
+    }catch(error){const code=(error as Error).message;setMessage(code==='SHORTS_MONTAGE_SUBTITLES_REQUIRED'
+      ?'Для плану Shorts потрібні субтитри SRT сценарію з таймкодами монтажу.'
+      :'Gemini не повернув перевірену пропозицію. Спробуйте пізніше або відредагуйте фрагменти вручну.');}
     finally{setSuggesting(false);}
   }
   async function publish(event:React.FormEvent<HTMLFormElement>,item:Short,manual=false){

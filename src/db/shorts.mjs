@@ -3,6 +3,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {activeMember} from '../access/membership.mjs';
 import {uuid} from '../editorial/workflow-input.mjs';
 import {validateShortsManifest} from '../media/shorts-manifest.mjs';
+import {montageSubtitleTranscript} from '../analysis/shorts-proposal.mjs';
 import {MAX_STORED_BYTES,STORAGE_DAYS} from '../media/montage-storage.mjs';
 import {activeMontagePlan} from './montage-plans.mjs';
 
@@ -81,7 +82,7 @@ export async function reserveShortsProposal(db,identity,episodeId,input,config){
       throw Error(existing.state==='unknown'?'SHORTS_PROPOSAL_UNKNOWN':'SHORTS_PROPOSAL_PENDING');
     }
     const {rows:[source]}=await tx.query(`SELECT m.id,m.snapshot,m.sha256,m.report,m.state,m.expires_at,
-      e.version,e.status AS episode_status,c.status AS claim_status,c.version AS claim_version,cv.transcript_id
+      e.version,e.status AS episode_status,c.status AS claim_status,c.version AS claim_version
       FROM episode_media_revisions m JOIN episodes e ON e.id=m.episode_id JOIN claims c ON c.id=e.claim_id
       JOIN episode_versions ev ON ev.episode_id=e.id AND ev.version=m.episode_version
       JOIN claim_versions cv ON cv.claim_id=c.id AND cv.version=ev.claim_version
@@ -91,12 +92,12 @@ export async function reserveShortsProposal(db,identity,episodeId,input,config){
     if(source.state!=='passed'||!source.report?.durationMs||new Date(source.expires_at)<=new Date()) throw Error('MEDIA_NOT_READY');
     if(source.episode_status!=='approved'||source.claim_status!=='approved'||source.snapshot.episodeVersion!==source.version
       ||source.snapshot.claimVersion!==source.claim_version) throw Error('MEDIA_STALE');
-    const {rows:segments}=await tx.query(`SELECT position,start_ms,end_ms,body FROM transcript_segments
-      WHERE transcript_id=$1 ORDER BY position LIMIT 5001`,[source.transcript_id]);
-    if(!segments.length||segments.length>5000||segments.some(row=>row.start_ms===null||row.end_ms===null)) throw Error('TRANSCRIPT_REQUIRED');
-    const transcript=segments.map(row=>({i:row.position,s:Number(row.start_ms),e:Number(row.end_ms),t:row.body}));
     const snapshot=source.snapshot;
-    const context={durationMs:Number(source.report.durationMs),episode:snapshot.episode,claim:snapshot.claim,transcript,
+    const durationMs=Number(source.report.durationMs);
+    // Clips are cut from the montage MP4, so plan on the montage's own SRT timeline, never the source transcript.
+    const transcript=montageSubtitleTranscript(snapshot.episode?.subtitles,durationMs);
+    const episode={...snapshot.episode};delete episode.subtitles;
+    const context={durationMs,episode,claim:snapshot.claim,transcript,
       montagePlan:{id:selectedPlan.id,name:selectedPlan.name,version:selectedPlan.version,spec:selectedPlan.spec}};
     const serialized=JSON.stringify(context);
     if(Buffer.byteLength(serialized)>96_000) throw Error('TRANSCRIPT_TOO_LARGE');
