@@ -1,7 +1,7 @@
 import {activeMember} from '../access/membership.mjs';
 
-export const logProcesses={captions:'Субтитри YouTube',gemini:'Аналіз Gemini',grok:'Перевірка Grok',render:'Монтаж і Shorts',upload:'Публікація YouTube',comments:'Коментарі YouTube',editorial:'Редакційні рішення',links:'Короткі посилання'};
-const states={queued:'У черзі',running:'Виконується',done:'Завершено',succeeded:'Завершено',accepted:'Прийнято',failed:'Помилка',unknown:'Результат невідомий — потрібна перевірка',submitting:'Передається провайдеру',submitted:'Обробляється провайдером',rendering:'Збирається відео',ready:'Відео готове',expired:'Термін дії минув',uploading:'Завантажується',processing:'YouTube обробляє відео',published:'Опубліковано',scheduled:'Заплановано',publishing:'Відправляється',rejected:'Відхилено',checking:'Технічна перевірка',passed:'Перевірку пройдено',waiting_plain:'Перевірка видимості тексту без посилання',link_ready:'Текст видимий — очікується додавання посилання',link_sending:'Додавання посилання',waiting_link:'Перевірка видимості після додавання посилання',verified:'Видимість із посиланням підтверджено',blocked:'Видимість не підтверджено',create:'Створено',edit:'Збережено нову версію',submit:'Передано на перевірку',approve:'Схвалено',return:'Повернуто на доопрацювання',withdraw:'Відкликано',drafted:'Чернетку збережено',approved:'Точний текст і посилання схвалено',session_started:'Почато завантаження',chunk_accepted:'Частину відео прийнято',disconnected:'Канал від’єднано',prepared:'Коротке посилання підготовлено'};
+export const logProcesses={captions:'Субтитри YouTube',gemini:'Аналіз Gemini',grok:'Перевірка Grok',render:'Монтаж і Shorts',upload:'Публікація YouTube',comments:'Коментарі YouTube',editorial:'Редакційні рішення',links:'Короткі посилання',reports:'Скарги YouTube'};
+const states={queued:'У черзі',running:'Виконується',done:'Завершено',succeeded:'Завершено',accepted:'Прийнято',failed:'Помилка',unknown:'Результат невідомий — потрібна перевірка',submitting:'Передається провайдеру',submitted:'Обробляється провайдером',rendering:'Збирається відео',ready:'Відео готове',expired:'Термін дії минув',uploading:'Завантажується',processing:'YouTube обробляє відео',published:'Опубліковано',scheduled:'Заплановано',publishing:'Відправляється',rejected:'Відхилено',checking:'Технічна перевірка',passed:'Перевірку пройдено',waiting_plain:'Перевірка видимості тексту без посилання',link_ready:'Текст видимий — очікується додавання посилання',link_sending:'Додавання посилання',waiting_link:'Перевірка видимості після додавання посилання',verified:'Видимість із посиланням підтверджено',blocked:'Видимість не підтверджено',create:'Створено',edit:'Збережено нову версію',submit:'Передано на перевірку',approve:'Схвалено',return:'Повернуто на доопрацювання',withdraw:'Відкликано',drafted:'Чернетку збережено',approved:'Точний текст і посилання схвалено',session_started:'Почато завантаження',chunk_accepted:'Частину відео прийнято',disconnected:'Канал від’єднано',prepared:'Коротке посилання підготовлено',report_draft:'Чернетку скарги збережено',report_confirmed:'Редактор підтвердив ролик, категорію й текст скарги',report_sending:'Скарга відправляється в YouTube',report_accepted:'Скаргу прийнято YouTube',report_rejected:'YouTube відхилив скаргу',report_unknown:'Потрібна ручна перевірка'};
 const explanations={
  YOUTUBE_TOKEN_REFRESH_REVOKED:'Google відкликав дозвіл. Перепідключіть канал.',
  YOUTUBE_COMMENT_OUTCOME_UNKNOWN:'YouTube не підтвердив результат. Не повторюйте відправлення до перевірки коментаря.',
@@ -13,26 +13,40 @@ const explanations={
  GROK_BATCH_CREATE_FAILED:'Не вдалося створити запит Grok Batch. Перевірте доступ провайдера.',
  BUDGET_EXHAUSTED:'Досягнуто ліміт витрат.',
  LOGIN_REQUIRED:'YouTube вимагає авторизацію для отримання матеріалу.',
+ YOUTUBE_ABUSE_OUTCOME_UNKNOWN:'Запит міг дійти до YouTube, але відповіді немає. Автоматичний повтор заблоковано — перевірте вручну.',
+ YOUTUBE_ABUSE_RESPONSE_UNEXPECTED:'YouTube відповів не 204. Автоматичний повтор заблоковано — перевірте вручну.',
+ YOUTUBE_ABUSE_INVALID_REASON:'YouTube не прийняв категорію скарги. Виберіть чинну категорію й підтвердьте ще раз.',
+ YOUTUBE_ABUSE_RATE_LIMIT:'Перевищено ліміт запитів YouTube. Спробуйте пізніше з новим підтвердженням.',
+ YOUTUBE_ABUSE_VIDEO_NOT_FOUND:'YouTube не знайшов відео: його видалено, приховано або ID неправильний.',
+ YOUTUBE_ABUSE_SCOPE_REQUIRED:'Підключення YouTube не має дозволу youtube.force-ssl. Перепідключіть канал.',
+ YOUTUBE_ABUSE_AUTH_FAILED:'Google не прийняв токен підключення. Перепідключіть канал.',
+ YOUTUBE_ABUSE_FORBIDDEN:'YouTube заборонив цьому акаунту надсилати скаргу.',
 };
-export function logLevel(state){if(['failed','blocked'].includes(state))return 'error';if(['unknown','expired','rejected','return','disconnected'].includes(state))return 'warning';if(['queued','running','submitting','submitted','rendering','uploading','processing','publishing','checking','waiting_plain','link_ready','link_sending','waiting_link','scheduled'].includes(state))return 'active';return 'success';}
+export function logLevel(state){if(['failed','blocked','report_rejected'].includes(state))return 'error';if(['unknown','expired','rejected','return','disconnected','report_unknown'].includes(state))return 'warning';if(['report_sending','queued','running','submitting','submitted','rendering','uploading','processing','publishing','checking','waiting_plain','link_ready','link_sending','waiting_link','scheduled'].includes(state))return 'active';return 'success';}
 export function logFilters(input={}){
  const value=key=>typeof input[key]==='string'?input[key]:'';
  const validDate=s=>/^\d{4}-\d{2}-\d{2}$/.test(s)&&!Number.isNaN(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s;
  return {process:Object.hasOwn(logProcesses,value('process'))?value('process'):'',level:['error','warning','active','success'].includes(value('level'))?value('level'):'',q:value('q').trim().slice(0,160),from:validDate(value('from'))?value('from'):'',to:validDate(value('to'))?value('to'):'',page:Math.min(100000,Math.max(1,Number.parseInt(value('page'),10)||1))};
 }
 const union=`
- SELECT 'captions:'||video_id AS key,'captions' AS process,status AS state,updated_at AS time,video_id,NULL::uuid AS episode_id,error_code,'snapshot' AS kind FROM captions_import_jobs
- UNION ALL SELECT 'gemini:'||id,'gemini',status,updated_at,video_id,NULL,error_code,'snapshot' FROM ai_jobs
- UNION ALL SELECT 'grok:'||id,'grok',state,updated_at,NULL,episode_id,error_code,'snapshot' FROM episode_grok_reviews
- UNION ALL SELECT 'render:'||id,'render',state,created_at,NULL,episode_id,error_code,'snapshot' FROM shorts_renders
- UNION ALL SELECT 'media:'||id,'render',state,created_at,NULL,episode_id,error_code,'snapshot' FROM episode_media_revisions
- UNION ALL SELECT 'upload:'||id,'upload',state,updated_at,NULL,episode_id,error_code,'snapshot' FROM youtube_short_uploads
- UNION ALL SELECT 'comment:'||id,'comments',state,updated_at,NULL,episode_id,error_code,'snapshot' FROM youtube_short_comments
- UNION ALL SELECT 'visibility:'||s.comment_id,'comments',s.phase,s.updated_at,NULL,c.episode_id,s.error_code,'snapshot' FROM youtube_comment_steps s JOIN youtube_short_comments c ON c.id=s.comment_id
- UNION ALL SELECT 'comment-event:'||ev.id,'comments',ev.action,ev.created_at,NULL,c.episode_id,NULL,'event' FROM youtube_short_comment_events ev JOIN youtube_short_comments c ON c.id=ev.comment_id
- UNION ALL SELECT 'upload-event:'||ev.id,'upload',ev.action,ev.created_at,NULL,u.episode_id,NULL,'event' FROM youtube_upload_events ev JOIN youtube_short_uploads u ON u.id=ev.upload_id
- UNION ALL SELECT 'editorial:'||ev.id,'editorial',ev.action,ev.created_at,cl.video_id,ev.episode_id,NULL,'event' FROM editorial_events ev LEFT JOIN claims cl ON cl.id=ev.claim_id
- UNION ALL SELECT 'link:'||c.id,'links','prepared',c.updated_at,NULL,c.episode_id,NULL,'snapshot' FROM youtube_short_comments c WHERE c.input_snapshot->>'preparedShortLink' IS NOT NULL
+ SELECT 'captions:'||video_id AS key,'captions' AS process,status AS state,updated_at AS time,video_id,NULL::uuid AS episode_id,error_code,'snapshot' AS kind,NULL::jsonb AS details FROM captions_import_jobs
+ UNION ALL SELECT 'gemini:'||id,'gemini',status,updated_at,video_id,NULL,error_code,'snapshot',NULL::jsonb FROM ai_jobs
+ UNION ALL SELECT 'grok:'||id,'grok',state,updated_at,NULL,episode_id,error_code,'snapshot',NULL::jsonb FROM episode_grok_reviews
+ UNION ALL SELECT 'render:'||id,'render',state,created_at,NULL,episode_id,error_code,'snapshot',NULL::jsonb FROM shorts_renders
+ UNION ALL SELECT 'media:'||id,'render',state,created_at,NULL,episode_id,error_code,'snapshot',NULL::jsonb FROM episode_media_revisions
+ UNION ALL SELECT 'upload:'||id,'upload',state,updated_at,NULL,episode_id,error_code,'snapshot',NULL::jsonb FROM youtube_short_uploads
+ UNION ALL SELECT 'comment:'||id,'comments',state,updated_at,NULL,episode_id,error_code,'snapshot',NULL::jsonb FROM youtube_short_comments
+ UNION ALL SELECT 'visibility:'||s.comment_id,'comments',s.phase,s.updated_at,NULL,c.episode_id,s.error_code,'snapshot',NULL::jsonb FROM youtube_comment_steps s JOIN youtube_short_comments c ON c.id=s.comment_id
+ UNION ALL SELECT 'comment-event:'||ev.id,'comments',ev.action,ev.created_at,NULL,c.episode_id,NULL,'event',NULL::jsonb FROM youtube_short_comment_events ev JOIN youtube_short_comments c ON c.id=ev.comment_id
+ UNION ALL SELECT 'upload-event:'||ev.id,'upload',ev.action,ev.created_at,NULL,u.episode_id,NULL,'event',NULL::jsonb FROM youtube_upload_events ev JOIN youtube_short_uploads u ON u.id=ev.upload_id
+ UNION ALL SELECT 'editorial:'||ev.id,'editorial',ev.action,ev.created_at,cl.video_id,ev.episode_id,NULL,'event',NULL::jsonb FROM editorial_events ev LEFT JOIN claims cl ON cl.id=ev.claim_id
+ UNION ALL SELECT 'link:'||c.id,'links','prepared',c.updated_at,NULL,c.episode_id,NULL,'snapshot',NULL::jsonb FROM youtube_short_comments c WHERE c.input_snapshot->>'preparedShortLink' IS NOT NULL
+ UNION ALL SELECT 'report:'||r.id,'reports','report_'||CASE WHEN r.state='sending' AND r.sent_at<now()-interval '2 minutes' THEN 'unknown' WHEN r.state='confirmed' THEN 'confirmed' ELSE r.state END,r.updated_at,r.video_id,NULL,r.error_code,'snapshot',
+  jsonb_build_object('sourceYoutubeId',r.source_youtube_id,'claimVersion',r.claim_version,'reasonId',r.reason_id,'secondaryReasonId',r.secondary_reason_id,'reasonLabel',r.reason_label,'approvedBy',ap.email,'sentAt',r.sent_at,'httpStatus',r.http_status,'reporterChannelId',r.reporter_channel_id)
+  FROM youtube_abuse_reports r LEFT JOIN members ap ON ap.id=r.confirmed_by
+ UNION ALL SELECT 'report-event:'||ev.id,'reports','report_'||CASE WHEN ev.action IN ('drafted','edited') THEN 'draft' ELSE ev.action END,ev.created_at,r.video_id,NULL,ev.details->>'code','event',
+  jsonb_build_object('sourceYoutubeId',ev.details->>'sourceYoutubeId','claimVersion',ev.details->'claimVersion','reasonId',ev.details->>'reasonId','secondaryReasonId',ev.details->>'secondaryReasonId','actor',actor.email,'httpStatus',ev.details->'httpStatus')
+  FROM youtube_abuse_report_events ev JOIN youtube_abuse_reports r ON r.id=ev.report_id LEFT JOIN members actor ON actor.id=ev.actor_id
 `;
 export async function loadProjectLog(db,identity,input={}){
  const member=await activeMember(db,identity);
@@ -41,9 +55,9 @@ export async function loadProjectLog(db,identity,input={}){
  const {rows:[result]}=await db.query(`WITH raw AS (${union}), enriched AS (
  SELECT r.*,COALESCE(r.video_id,cl.video_id) AS linked_video_id,v.youtube_id,
  left(COALESCE(ver.content->>'title',v.youtube_id,'Проєкт'),200) AS title,
- CASE WHEN r.state IN ('failed','blocked') THEN 'error'
- WHEN r.state IN ('unknown','expired','rejected','return','disconnected') THEN 'warning'
- WHEN r.state IN ('queued','running','submitting','submitted','rendering','uploading','processing','publishing','checking','waiting_plain','link_ready','link_sending','waiting_link','scheduled') THEN 'active' ELSE 'success' END AS level
+ CASE WHEN r.state IN ('failed','blocked','report_rejected') THEN 'error'
+ WHEN r.state IN ('unknown','expired','rejected','return','disconnected','report_unknown') THEN 'warning'
+ WHEN r.state IN ('report_sending','queued','running','submitting','submitted','rendering','uploading','processing','publishing','checking','waiting_plain','link_ready','link_sending','waiting_link','scheduled') THEN 'active' ELSE 'success' END AS level
  FROM raw r LEFT JOIN episodes e ON e.id=r.episode_id LEFT JOIN claims cl ON cl.id=e.claim_id
  LEFT JOIN videos v ON v.id=COALESCE(r.video_id,cl.video_id)
  LEFT JOIN episode_versions ver ON ver.episode_id=e.id AND ver.version=e.version

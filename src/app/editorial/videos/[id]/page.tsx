@@ -9,6 +9,7 @@ import { AnalysisPanel } from '../../analysis-panel';
 import { CaptionsBookmarklet } from '../../captions-bookmarklet';
 import { captionsBookmarkletHref } from '../../../../youtube/captions-bookmarklet.mjs';
 import { ScenarioGeminiButton } from '../../scenario-gemini-button';
+import { AbuseReportPanel } from '../../abuse-report-panel';
 import {EpisodeGrokReviewPanel,type EpisodeGrokReview} from '../../episode-grok-review-panel';
 import {listEpisodeGrokReviewsForEpisodes} from '../../../../db/episode-grok.mjs';
 import {listUsableMontagePlans} from '../../../../db/montage-plans.mjs';
@@ -148,6 +149,7 @@ export default async function VideoPage({ params, searchParams }: {
           <ClaimForm key={claim.revision} videoId={videoId} transcripts={transcripts} claim={claim} />
         </details>}
         <h4>Сценарії</h4>
+        {claim.status==='approved' && (workflow.roles as string[]).some(role=>role==='editor'||role==='factchecker') && <AbuseReportPanel claimId={claim.id} />}
         {author && claim.status==='approved' && <details><summary>Новий сценарій</summary><EpisodeForm claim={claim} /></details>}
         {author && claim.status==='approved' && <ScenarioGeminiButton claimId={claim.id} />}
         {episodes.filter(episode=>episode.claim_id===claim.id).map(episode=><article className="workflow-card" key={episode.id}>
