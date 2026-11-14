@@ -6,6 +6,7 @@ import { listShortRenders } from '../../../../db/shorts.mjs';
 import { loadPublications } from '../../../../db/publications.mjs';
 import { PublicationPanel, type Publication } from '../../publication-panel';
 import { AnalysisPanel } from '../../analysis-panel';
+import { CaptionsCheckPanel } from '../../captions-check-panel';
 import { ScenarioGeminiButton } from '../../scenario-gemini-button';
 import {EpisodeGrokReviewPanel,type EpisodeGrokReview} from '../../episode-grok-review-panel';
 import {listEpisodeGrokReviewsForEpisodes} from '../../../../db/episode-grok.mjs';
@@ -81,6 +82,7 @@ export default async function VideoPage({ params, searchParams }: {
   ]);
   const byEpisode = new Map(publications.map(publication=>[publication.episode_id,publication]));
   const author = workflow.roles.includes('author');
+  const editorial = (workflow.roles as string[]).some(role=>['author','factchecker','editor','admin'].includes(role));
   const transcripts: Transcript[] = workflow.transcripts;
   const claims: Claim[] = workflow.claims;
   const episodes: Episode[] = workflow.episodes;
@@ -117,6 +119,7 @@ export default async function VideoPage({ params, searchParams }: {
       </li>)}</ol>}
       {segments.length===300 && <p>Показано перші 300 фрагментів.</p>}
     </section>
+    {editorial&&<CaptionsCheckPanel videoId={videoId} />}
     <AnalysisPanel videoId={videoId} transcripts={transcripts} canRun={author} />
     <section>
       <h2>Твердження</h2>

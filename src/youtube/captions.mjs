@@ -109,6 +109,13 @@ export const playerClients = [
   { name:'WEB', id:1, version:'2.20261101.00.00', userAgent:UA, extra:{} },
 ];
 
+// YouTube's own short explanation (e.g. "Sign in to confirm you're not a bot"), without links, for editors.
+function playabilityNote(status) {
+  const text = [status?.reason, status?.errorScreen?.playerErrorMessageRenderer?.subreason?.simpleText]
+    .filter(value => typeof value === 'string').join(' — ');
+  return text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim().slice(0, 160) || null;
+}
+
 async function tracksFromPlayer(fetchImpl, youtubeId, client = playerClients[1]) {
   const response = await get(fetchImpl, 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
     method:'POST', headers:{ 'Content-Type':'application/json', 'User-Agent':client.userAgent,
@@ -119,7 +126,7 @@ async function tracksFromPlayer(fetchImpl, youtubeId, client = playerClients[1])
   if (!response.ok) return { reason:client.name + '_HTTP_' + response.status };
   const data = await response.json().catch(() => null);
   const status = data?.playabilityStatus?.status;
-  if (status && status !== 'OK') return { reason:client.name + '_' + status };
+  if (status && status !== 'OK') return { reason:client.name + '_' + status, note:playabilityNote(data.playabilityStatus) };
   return { tracks:data?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? null };
 }
 
@@ -145,23 +152,32 @@ async function downloadTrack(fetchImpl, track) {
 }
 
 /** @returns {Promise<{ok:true,language:string,automatic:boolean,segments:object[],srt:string}|{ok:false,reason:string}>} */
-export async function fetchYouTubeCaptions(youtubeId, { fetchImpl, env = process.env } = {}) {
-  if (!/^[\w-]{11}$/.test(youtubeId ?? '')) return { ok:false, reason:'INVALID_ID' };
+// Every outcome carries `steps` (one per source: reason code + YouTube's note) and `proxyFailures`
+// ({proxy, status, codes} when the proxy itself refused and the request went direct). No credentials.
+export async function fetchYouTubeCaptions(youtubeId, { fetchImpl, env = process.env, proxyDeps = {} } = {}) {
+  if (!/^[\w-]{11}$/.test(youtubeId ?? '')) return { ok:false, reason:'INVALID_ID', via:'none', steps:[], proxyFailures:[] };
   let via = 'custom';
-  if (!fetchImpl) ({ fetchImpl, via } = captionsFetch(env));
-  const reasons = [];
+  const proxyFailures = [];
+  if (!fetchImpl) ({ fetchImpl, via } = captionsFetch(env, { ...proxyDeps, onProxyDown:failure => proxyFailures.push(failure) }));
+  const steps = [];
+  const names = [...playerClients.map(client => client.name), 'WATCH'];
   const sources = [...playerClients.map(client => (f, id) => tracksFromPlayer(f, id, client)), tracksFromWatchPage];
-  for (const source of sources) {
+  for (const [index, source] of sources.entries()) {
+    const step = { source:names[index], reason:null, note:null };
+    steps.push(step);
     try {
       const found = await source(fetchImpl, youtubeId);
+      step.note = found.note ?? null;
       const track = pickCaptionTrack(found.tracks);
-      if (!track) { reasons.push(found.reason ?? (found.tracks ? 'NO_USABLE_TRACK' : 'NO_TRACKS')); continue; }
+      if (!track) { step.reason = found.reason ?? (found.tracks ? 'NO_USABLE_TRACK' : 'NO_TRACKS'); continue; }
       const segments = mergeCaptionCues(await downloadTrack(fetchImpl, track));
-      if (segments.length < 3) { reasons.push('EMPTY_TRACK'); continue; }
-      return { ok:true, language:track.languageCode, automatic:track.kind === 'asr', segments, srt:captionsToSrt(segments), via };
+      if (segments.length < 3) { step.reason = 'EMPTY_TRACK'; continue; }
+      step.reason = 'OK';
+      return { ok:true, language:track.languageCode, automatic:track.kind === 'asr', segments, srt:captionsToSrt(segments),
+        via, steps, proxyFailures };
     } catch (error) {
-      reasons.push(error?.name === 'TimeoutError' ? 'TIMEOUT' : 'FETCH_FAILED');
+      step.reason = error?.name === 'TimeoutError' ? 'TIMEOUT' : 'FETCH_FAILED';
     }
   }
-  return { ok:false, reason:reasons.join(',') || 'UNAVAILABLE', via };
+  return { ok:false, reason:steps.map(step => step.reason).join(',') || 'UNAVAILABLE', via, steps, proxyFailures };
 }

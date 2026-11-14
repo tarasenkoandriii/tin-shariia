@@ -63,7 +63,7 @@ let cached = { url:undefined, agent:null };
  * fetch that goes through the configured proxy and retries once directly if the proxy itself is down.
  * Without a proxy it is plain fetch. Returns the fetch plus a description for logs.
  */
-export function captionsFetch(env = process.env, { baseFetch = fetch, proxiedFetch = undiciFetch, makeAgent = url => new ProxyAgent(url) } = {}) {
+export function captionsFetch(env = process.env, { baseFetch = fetch, proxiedFetch = undiciFetch, makeAgent = url => new ProxyAgent(url), onProxyDown } = {}) {
   const url = captionsProxyUrl(env);
   if (!url) return { fetchImpl:baseFetch, via:'direct' };
   if (cached.url !== url) cached = { url, agent:makeAgent(url) };
@@ -74,7 +74,10 @@ export function captionsFetch(env = process.env, { baseFetch = fetch, proxiedFet
       return await proxiedFetch(input, { ...init, dispatcher:agent });
     } catch (error) {
       if (!isProxyFailure(error)) throw error;
-      console.warn('YOUTUBE_CAPTIONS_PROXY_DOWN', { proxy:host, ...proxyFailureDetail(error) });
+      // Callers get only the HTTP status and error codes — never credentials or exception text.
+      const { status, codes } = proxyFailureDetail(error);
+      onProxyDown?.({ proxy:host, status, codes });
+      console.warn('YOUTUBE_CAPTIONS_PROXY_DOWN', { proxy:host, status, codes });
       return baseFetch(input, init);
     }
   };

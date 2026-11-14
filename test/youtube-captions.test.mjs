@@ -65,9 +65,11 @@ test('fetchYouTubeCaptions uses the player API, falls back to the watch page and
   assert.equal(fallback.segments.length,4);
   const blocked=await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async url=>new URL(url).pathname==='/youtubei/v1/player'
     ?Response.json({playabilityStatus:{status:'LOGIN_REQUIRED'}}):new Response('<form action="https://consent.youtube.com/save">')});
-  assert.deepEqual(blocked,{ok:false,reason:'ANDROID_VR_LOGIN_REQUIRED,WEB_LOGIN_REQUIRED,WATCH_CONSENT',via:'custom'});
-  assert.deepEqual(await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async()=>{throw new TypeError('network');}}),{ok:false,reason:'FETCH_FAILED,FETCH_FAILED,FETCH_FAILED',via:'custom'});
-  assert.deepEqual(await fetchYouTubeCaptions('bad id'),{ok:false,reason:'INVALID_ID'});
+  assert.deepEqual([blocked.ok,blocked.reason,blocked.via],[false,'ANDROID_VR_LOGIN_REQUIRED,WEB_LOGIN_REQUIRED,WATCH_CONSENT','custom']);
+  assert.deepEqual(blocked.steps.map(step=>step.source),['ANDROID_VR','WEB','WATCH']);
+  const offline=await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async()=>{throw new TypeError('network');}});
+  assert.deepEqual([offline.ok,offline.reason,offline.via],[false,'FETCH_FAILED,FETCH_FAILED,FETCH_FAILED','custom']);
+  assert.deepEqual(await fetchYouTubeCaptions('bad id'),{ok:false,reason:'INVALID_ID',via:'none',steps:[],proxyFailures:[]});
   // A track URL pointing off YouTube is never fetched.
   const offsite=await fetchYouTubeCaptions('QAcaption01',{fetchImpl:async url=>{
     if(new URL(url).hostname==='evil.example')throw Error('must not fetch');
