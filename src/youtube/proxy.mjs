@@ -33,6 +33,19 @@ export function proxyHostForDisplay(url) {
   try { const u = new URL(url); return u.port ? `${u.hostname}:${u.port}` : u.hostname; } catch { return null; }
 }
 
+// Safe description of a proxy failure for logs: error codes and the proxy's HTTP status, never credentials.
+export function proxyFailureDetail(error) {
+  const codes = [], messages = [];
+  for (let e = error, depth = 0; e && depth < 5; e = e.cause, depth++) {
+    if (e.code) codes.push(String(e.code));
+    if (e.message) messages.push(String(e.message));
+  }
+  const text = messages.join(' | ');
+  const status = Number(/proxy response \((\d{3})\)/i.exec(text)?.[1]) || null;
+  return { codes:[...new Set(codes)].slice(0, 4), status,
+    message:text.replace(/[a-z][\w+.-]*:\/\/[^@\s/]+@/gi, '***@').slice(0, 160) };
+}
+
 // The proxy itself failed (unreachable, auth refused) — as opposed to YouTube answering through it.
 export function isProxyFailure(error) {
   const codes = new Set(['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'EPROTO',
@@ -61,7 +74,7 @@ export function captionsFetch(env = process.env, { baseFetch = fetch, proxiedFet
       return await proxiedFetch(input, { ...init, dispatcher:agent });
     } catch (error) {
       if (!isProxyFailure(error)) throw error;
-      console.warn('YOUTUBE_CAPTIONS_PROXY_DOWN', { proxy:host });
+      console.warn('YOUTUBE_CAPTIONS_PROXY_DOWN', { proxy:host, ...proxyFailureDetail(error) });
       return baseFetch(input, init);
     }
   };

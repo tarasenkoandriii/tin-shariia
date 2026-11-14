@@ -5,7 +5,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {database} from '../src/db/runtime.mjs';
 import {registerVideo} from '../src/db/editorial-import.mjs';
 import {enqueueYouTubePreferCaptions} from '../src/analysis/queue.mjs';
-import {captionsFetch,captionsProxyUrl,isProxyFailure,proxyHostForDisplay,webshareProxyUrl} from '../src/youtube/proxy.mjs';
+import {captionsFetch,captionsProxyUrl,isProxyFailure,proxyFailureDetail,proxyHostForDisplay,webshareProxyUrl} from '../src/youtube/proxy.mjs';
 import {captionTracksFromHtml,captionsToSrt,fetchYouTubeCaptions,mergeCaptionCues,parseCaptionPayload,pickCaptionTrack} from '../src/youtube/captions.mjs';
 import {parseTranscript} from '../src/editorial/transcript.mjs';
 
@@ -159,4 +159,13 @@ test('captions proxy: Webshare URL like roadscout, full URL wins, falls back dir
   assert.equal(isProxyFailure({message:'Proxy response (407) !== 200 when HTTP Tunneling'}),true);
   assert.equal(isProxyFailure(new Error('HTTP 429')),false);
   assert.equal(proxied,3);
+});
+
+test('proxy failure detail names the code and proxy status without credentials',()=>{
+  const auth=Object.assign(new TypeError('fetch failed'),{cause:Object.assign(new Error('Proxy response (407) !== 200 when HTTP Tunneling to http://user-de-rotate:hunter2@p.webshare.io:80'),{code:'UND_ERR_ABORTED'})});
+  const detail=proxyFailureDetail(auth);
+  assert.equal(detail.status,407);
+  assert.deepEqual(detail.codes,['UND_ERR_ABORTED']);
+  assert.ok(!JSON.stringify(detail).includes('hunter2')&&!JSON.stringify(detail).includes('user-de-rotate'));
+  assert.deepEqual(proxyFailureDetail(Object.assign(new TypeError('fetch failed'),{cause:{code:'ECONNREFUSED',message:'connect ECONNREFUSED'}})).codes,['ECONNREFUSED']);
 });
