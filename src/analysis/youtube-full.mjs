@@ -8,7 +8,17 @@ export const youtubeWindowSec = 480;
 export const youtubeOverlapSec = 15;
 export const youtubeMaxWindows = 24;            // 24 × 8 min ≈ 3 h 10 min
 export const youtubeOutputLimit = 4096;
-const tokensPerSecond = 120;                    // low media resolution at 1 fps plus audio, with headroom
+// Claims live in speech, so Gemini needs every second of audio but only occasional frames.
+// GEMINI_YOUTUBE_FPS (0.05–1, default 0.2 = one frame every 5 s) applies to every YouTube-by-URL call.
+export const defaultYouTubeFps = 0.2;
+export function youtubeFps(env = process.env) {
+  const value = Number(env.GEMINI_YOUTUBE_FPS);
+  return Number.isFinite(value) && value >= 0.05 && value <= 1 ? value : defaultYouTubeFps;
+}
+// Low media resolution ≈ 70 tokens per frame plus 32 audio tokens per second, with 25% headroom for the reserve.
+export function youtubeTokensPerSecond(fps = youtubeFps()) {
+  return Math.ceil((fps * 70 + 32) * 1.25);
+}
 const promptTokens = 1500;
 
 const proposal = z.object({
@@ -42,7 +52,7 @@ export function splitYouTubeVideo(youtubeId, durationSec) {
 }
 
 export function youtubeReserve(windows, config) {
-  return windows.reduce((sum, w) => sum + ((w.endSec - w.startSec) * tokensPerSecond + promptTokens) * config.inputRate
+  return windows.reduce((sum, w) => sum + ((w.endSec - w.startSec) * youtubeTokensPerSecond() + promptTokens) * config.inputRate
     + youtubeOutputLimit * config.outputRate, 0);
 }
 
@@ -86,7 +96,7 @@ export function youtubeGeminiProvider({ env=process.env, client }={}) {
     let response;
     try {
       response = await ai.models.generateContent({ model, contents:[{ role:'user', parts:[
-        { fileData:{ fileUri:window.url }, videoMetadata:{ startOffset:window.startSec+'s', endOffset:window.endSec+'s', fps:1 } },
+        { fileData:{ fileUri:window.url }, videoMetadata:{ startOffset:window.startSec+'s', endOffset:window.endSec+'s', fps:youtubeFps(env) } },
         { text:youtubePrompt(window) },
       ] }], config:{ mediaResolution:'MEDIA_RESOLUTION_LOW', maxOutputTokens:youtubeOutputLimit,
         responseMimeType:'application/json', responseJsonSchema:responseSchema, thinkingConfig:{ thinkingLevel:'LOW' } } });

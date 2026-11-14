@@ -96,13 +96,23 @@ export async function fetchYouTubeChannel(accessToken,fetchImpl=fetch) {
 }
 
 export async function refreshYouTubeAccessToken(refreshToken,config,fetchImpl=fetch) {
-  const response=await fetchImpl('https://oauth2.googleapis.com/token',{
-    method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:new URLSearchParams({refresh_token:refreshToken,client_id:config.clientId,
-      client_secret:config.clientSecret,grant_type:'refresh_token'}),cache:'no-store',
-  });
-  const body=await providerJson(response);
-  if(typeof body.access_token!=='string'||!Number.isFinite(body.expires_in)) throw Error('YOUTUBE_TOKEN_REFRESH_FAILED');
+  let response;
+  try {
+    response=await fetchImpl('https://oauth2.googleapis.com/token',{
+      method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({refresh_token:refreshToken,client_id:config.clientId,
+        client_secret:config.clientSecret,grant_type:'refresh_token'}),cache:'no-store',
+      signal:AbortSignal.timeout(10000),
+    });
+  } catch { throw Error('YOUTUBE_TOKEN_REFRESH_FAILED'); }
+  const body=await response.json().catch(()=>null);
+  if(!response.ok){
+    if(body?.error==='invalid_grant') throw Error('YOUTUBE_TOKEN_REFRESH_REVOKED');
+    if(body?.error==='invalid_client') throw Error('YOUTUBE_TOKEN_REFRESH_CLIENT');
+    throw Error('YOUTUBE_TOKEN_REFRESH_FAILED');
+  }
+  if(typeof body?.access_token!=='string'||!body.access_token||!Number.isFinite(body.expires_in))
+    throw Error('YOUTUBE_TOKEN_REFRESH_FAILED');
   return body.access_token;
 }
 

@@ -4,12 +4,11 @@ import { activeMember } from '../access/membership.mjs';
 import { changeEditorial } from '../db/editorial-workflow.mjs';
 import { uuid } from '../editorial/workflow-input.mjs';
 import { monthlyAnalysisBudget } from './monthly-budget.mjs';
-import { youtubeUrl } from './youtube-full.mjs';
+import { youtubeFps, youtubeTokensPerSecond, youtubeUrl } from './youtube-full.mjs';
 
 const outputLimit = 6144;
 const contextSec = 60;          // video context around the quoted moment
 const maxVideoSec = 360;
-const tokensPerSecond = 120;
 const promptTokens = 4000;
 
 const scenarioSchema = z.object({
@@ -69,7 +68,7 @@ export async function generateScenarioDraft(db, identity, claimId, input, config
     const { rows:evidence } = await tx.query(
       'SELECT snapshot FROM claim_evidence WHERE claim_id=$1 AND claim_version=$2 ORDER BY position', [claim.id, claim.version]);
     const window = scenarioWindow(claim.content);
-    const reserve = ((window ? (window.endSec - window.startSec) * tokensPerSecond : 0) + promptTokens) * config.inputRate
+    const reserve = ((window ? (window.endSec - window.startSec) * youtubeTokensPerSecond() : 0) + promptTokens) * config.inputRate
       + outputLimit * config.outputRate;
     const budget = await monthlyAnalysisBudget(tx);
     if (Number(budget.used) + reserve > config.monthlyMicros) throw Error('BUDGET_EXHAUSTED');
@@ -88,7 +87,7 @@ export async function generateScenarioDraft(db, identity, claimId, input, config
   const ai = client ?? new GoogleGenAI({ apiKey:process.env.GEMINI_API_KEY, httpOptions:{ timeout:80000, retryOptions:{ attempts:1 } } });
   const parts = [];
   if (reservation.window) parts.push({ fileData:{ fileUri:youtubeUrl(reservation.youtubeId) },
-    videoMetadata:{ startOffset:reservation.window.startSec+'s', endOffset:reservation.window.endSec+'s', fps:1 } });
+    videoMetadata:{ startOffset:reservation.window.startSec+'s', endOffset:reservation.window.endSec+'s', fps:youtubeFps() } });
   parts.push({ text:scenarioPrompt(reservation.facts) });
   let response;
   try {

@@ -5,6 +5,8 @@ import { videoOutputLimit, videoPrompt, videoPromptVersion } from './video-input
 import { uuid } from '../editorial/workflow-input.mjs';
 import { makePrompt, mergeDrafts, outputLimit, promptVersion, splitTranscript } from './input.mjs';
 import { splitYouTubeVideo, youtubeDurationSec, youtubePromptVersion, youtubeReserve } from './youtube-full.mjs';
+import { fetchYouTubeCaptions } from '../youtube/captions.mjs';
+import { importTranscript } from '../db/editorial-import.mjs';
 
 const attemptsLimit=3;
 const transientLimit=2;
@@ -54,6 +56,38 @@ export function enqueueYouTubeAnalysis(db,identity,videoId,input,config,{duratio
       },
     };
   });
+}
+
+// Cheapest route first: if YouTube serves captions for the video, import them as a transcript and analyse the
+// text (a few thousand tokens). Otherwise, or with {captions:false}, Gemini watches the whole video by URL.
+export async function enqueueYouTubePreferCaptions(db,identity,videoId,input,config,
+  {captions=fetchYouTubeCaptions,duration=youtubeDurationSec,env=process.env}={}){
+  videoId=uuid(videoId);
+  const video=()=>enqueueYouTubeAnalysis(db,identity,videoId,input,config,{duration});
+  if(input.retry===true) return {...await video(),source:'video'};
+  const member=await activeMember(db,identity);
+  if(!member?.roles.includes('author')) throw Error('FORBIDDEN');
+  if(input.captions===false||env.YOUTUBE_CAPTIONS_ENABLED==='false') return {...await video(),source:'video',captionsSkipped:'DISABLED'};
+  const {rows:[row]}=await db.query('SELECT youtube_id FROM videos WHERE id=$1',[videoId]);
+  if(!row) throw Error('NOT_FOUND');
+  let found;
+  try{found=await captions(row.youtube_id);}catch{found={ok:false,reason:'FETCH_FAILED'};}
+  if(found.ok){
+    try{
+      const transcript=await importTranscript(db,{videoId,bytes:Buffer.from(found.srt,'utf8'),format:'srt'});
+      const job=await enqueueAnalysis(db,identity,videoId,{transcriptId:transcript.id},config);
+      console.info('YOUTUBE_CAPTIONS_USED',{language:found.language,automatic:found.automatic,segments:found.segments.length,via:found.via??null});
+      return {...job,source:'captions',transcriptId:transcript.id,
+        captions:{language:found.language,automatic:found.automatic,segments:found.segments.length}};
+    }catch(error){
+      // Too long for text analysis or unparsable: the whole-video route still works.
+      if(!['TRANSCRIPT_TOO_LARGE','SEGMENT_TOO_LARGE','INVALID_CUE','INVALID_CUE_INTERVAL','INVALID_TIMECODE','EMPTY_TRANSCRIPT']
+        .includes(error?.message)) throw error;
+      found={ok:false,reason:'IMPORT_'+error.message};
+    }
+  }
+  console.info('YOUTUBE_CAPTIONS_SKIPPED',{reason:String(found.reason).slice(0,200),via:found.via??null});
+  return {...await video(),source:'video',captionsSkipped:found.reason};
 }
 
 export function enqueueVideoAudit(db,identity,episodeId,mediaId,input,config){

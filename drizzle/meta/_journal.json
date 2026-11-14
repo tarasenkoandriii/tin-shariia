@@ -162,6 +162,27 @@
       "when": 1794558000000,
       "tag": "0022_grok_acceptance_threshold",
       "breakpoints": false
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794612000000,
+      "tag": "0023_registered_short_comments",
+      "breakpoints": false
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794620000000,
+      "tag": "0024_captions_import",
+      "breakpoints": false
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794656000000,
+      "tag": "0025_comment_publication_steps",
+      "breakpoints": false
     }
   ]
 }

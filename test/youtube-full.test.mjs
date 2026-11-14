@@ -6,7 +6,7 @@ import {database} from '../src/db/runtime.mjs';
 import {changeEditorial} from '../src/db/editorial-workflow.mjs';
 import {registerVideo} from '../src/db/editorial-import.mjs';
 import {analysisStatus,enqueueYouTubeAnalysis,processAnalysisStep} from '../src/analysis/queue.mjs';
-import {splitYouTubeVideo,validateYouTubeDrafts,youtubeDurationSec,youtubeGeminiProvider} from '../src/analysis/youtube-full.mjs';
+import {splitYouTubeVideo,validateYouTubeDrafts,youtubeDurationSec,youtubeFps,youtubeGeminiProvider,youtubeReserve,youtubeTokensPerSecond} from '../src/analysis/youtube-full.mjs';
 import {createClaimsFromDrafts} from '../src/db/claim-drafts.mjs';
 import {generateScenarioDraft,scenarioWindow} from '../src/analysis/scenario-ai.mjs';
 
@@ -52,7 +52,7 @@ test('Gemini provider sends the YouTube window and maps failures',async()=>{
   assert.equal(result.type,'success');
   assert.deepEqual(result.usage,{input:100,output:25});
   assert.equal(result.drafts[0].startMs,(465+1)*1000);
-  assert.deepEqual(request.contents[0].parts[0],{fileData:{fileUri:window.url},videoMetadata:{startOffset:'465s',endOffset:'600s',fps:1}});
+  assert.deepEqual(request.contents[0].parts[0],{fileData:{fileUri:window.url},videoMetadata:{startOffset:'465s',endOffset:'600s',fps:0.2}});
   const failing=status=>youtubeGeminiProvider({env,client:{models:{generateContent:async()=>{throw Object.assign(Error('x'),{status});}}}})('m',window);
   const original=console.error;console.error=()=>{};
   try{
@@ -134,7 +134,7 @@ test('whole-video analysis → draft claims (once) → approved claim → Gemini
     const requestId=crypto.randomUUID();
     const result=await generateScenarioDraft(db,'yt-author',claim.id,{requestId},config,{client});
     assert.equal(result.cached,false);
-    assert.deepEqual(request.contents[0].parts[0].videoMetadata,{startOffset:'410s',endOffset:'538s',fps:1});
+    assert.deepEqual(request.contents[0].parts[0].videoMetadata,{startOffset:'410s',endOffset:'538s',fps:0.2});
     assert.match(request.contents[0].parts[1].text,/12%/);
     const {rows:[episode]}=await db.query(`SELECT e.status,ev.content,ev.claim_version FROM episodes e
       JOIN episode_versions ev ON ev.episode_id=e.id AND ev.version=e.version WHERE e.id=$1`,[result.episodeId]);
@@ -149,4 +149,15 @@ test('whole-video analysis → draft claims (once) → approved claim → Gemini
     assert.equal((await db.query('SELECT count(*)::int AS n FROM episodes WHERE claim_id=$1',[claim.id])).rows[0].n,1);
     assert.equal(scenarioWindow({startMs:null,endMs:null}),null);
   }finally{await db.close?.();}
+});
+
+test('Gemini watches YouTube at a low, configurable frame rate and reserves budget for it',()=>{
+  assert.equal(youtubeFps({}),0.2);
+  assert.equal(youtubeFps({GEMINI_YOUTUBE_FPS:'0.1'}),0.1);
+  for(const bad of ['0','2','abc','-1','0.01']) assert.equal(youtubeFps({GEMINI_YOUTUBE_FPS:bad}),0.2);
+  assert.equal(youtubeTokensPerSecond(1),128);
+  assert.equal(youtubeTokensPerSecond(0.2),58);
+  // A 12-minute video reserves less than half of what 1 fps needed.
+  const windows=splitYouTubeVideo('QAfullvid01',720),config={inputRate:1,outputRate:0};
+  assert.ok(youtubeReserve(windows,config)<0.5*windows.reduce((n,w)=>n+(w.endSec-w.startSec)*128+1500,0));
 });

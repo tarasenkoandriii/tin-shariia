@@ -5,7 +5,7 @@ import { dispatchSources } from '../../../../workflows/dispatch';
 import {database} from '../../../../db/runtime.mjs';
 import {syncYouTubePublicationStats} from '../../../../youtube/publication-stats.mjs';
 import {dispatchEpisodeGrokReviews} from '../../../../analysis/episode-grok-review.mjs';
-import {dispatchYouTubeComments} from '../../../../youtube/comments.mjs';
+import {dispatchYouTubeComments,youtubeCommentPreflightCode} from '../../../../youtube/comments.mjs';
 
 const hash=(value: string)=>createHash('sha256').update(value).digest();
 const headers={'Cache-Control':'private, no-store'};
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     sources:sources.status==='fulfilled'?sources.value:{failed:true},
     montages:montages.status==='fulfilled'?montages.value:{failed:true},
     shorts:shorts.status==='fulfilled'?shorts.value:{failed:true},
-    publicationStats:publicationStats.status==='fulfilled'?publicationStats.value:{failed:true},
+    publicationStats:publicationStats.status==='fulfilled'?publicationStats.value:{failed:true,code:youtubeCommentPreflightCode(publicationStats.reason)},
     grokReviews:grokReviews.status==='fulfilled'?grokReviews.value:{failed:true},
     youtubeComments:youtubeComments.status==='fulfilled'?youtubeComments.value:{failed:true},
   }));

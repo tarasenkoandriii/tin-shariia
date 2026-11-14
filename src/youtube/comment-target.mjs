@@ -1,5 +1,3 @@
-import {SHARIY_CHANNEL_ID} from './shariy-channel.mjs';
-
 const COMMENT_SCOPE='https://www.googleapis.com/auth/youtube.force-ssl';
 
 export async function verifyYouTubeCommentTarget(row, {fetchImpl=fetch,apiKey=process.env.YOUTUBE_API_KEY}={}){
@@ -16,8 +14,9 @@ export async function verifyYouTubeCommentTarget(row, {fetchImpl=fetch,apiKey=pr
   const target=videos.find(video=>video.id===row.parent_video_id);
   const short=videos.find(video=>video.id===row.short_video_id);
   if(!target?.snippet?.channelId || target.status?.privacyStatus!=='public') throw Error('YOUTUBE_COMMENT_TARGET_UNVERIFIED');
-  const expected=row.target_kind==='source'?SHARIY_CHANNEL_ID:row.channel_id;
-  if(target.snippet.channelId!==expected) throw Error('YOUTUBE_COMMENT_WRONG_TARGET_CHANNEL');
+  if(row.target_kind==='source' && row.parent_video_id!==row.source_video_id)
+    throw Error('YOUTUBE_COMMENT_TARGET_UNVERIFIED');
+  if(row.target_kind==='main' && target.snippet.channelId!==row.channel_id) throw Error('YOUTUBE_COMMENT_WRONG_TARGET_CHANNEL');
   if(short?.snippet?.channelId!==row.channel_id||short.status?.privacyStatus!=='public') throw Error('YOUTUBE_COMMENT_SHORT_NOT_PUBLIC');
   return target.snippet.channelId;
 }

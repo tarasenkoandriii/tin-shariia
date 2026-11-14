@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { verdictLabels } from './workflow-types';
 import type { Claim, Evidence, Episode, Transcript } from './workflow-types';
@@ -67,6 +67,61 @@ export function VideoForm() {
     <button disabled={request.pending}>Додати відео</button>
     <Notice message={request.message} />
   </form>;
+}
+
+export function YouTubeCaptionsImport({ videoId }: { videoId: string }) {
+  const router = useRouter();
+  const [status, setStatus] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const [starting, setStarting] = useState(false);
+  const path = '/api/videos/'+videoId+'/captions-import';
+  const busy = status === 'queued' || status === 'running';
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      try {
+        const response = await fetch(path, { signal: controller.signal });
+        if (!response.ok) throw Error();
+        const { data } = await response.json();
+        if (controller.signal.aborted) return;
+        setStatus(data.status);
+        if (data.status === 'queued' || data.status === 'running') {
+          timer = setTimeout(poll, 4000);
+        } else if (data.status === 'done' && busy) {
+          router.refresh();
+        }
+        setMessage(data.status === 'queued' ? 'Очікуємо на зчитувач YouTube…'
+          : data.status === 'running' ? 'Зчитуємо субтитри YouTube…'
+          : data.status === 'done' ? 'Розшифрування збережено · версія '+data.version
+          : data.errorCode === 'NO_CAPTIONS' ? 'YouTube не повернув субтитри. Можна імпортувати файл.'
+          : data.status === 'failed' ? 'Не вдалося зчитати субтитри. Повторіть або імпортуйте файл.' : '');
+      } catch {
+        if (!controller.signal.aborted && busy) timer = setTimeout(poll, 8000);
+      }
+    }
+    void poll();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [path, router, busy]);
+
+  async function start() {
+    setStarting(true);
+    try {
+      const response = await fetch(path, { method: 'POST' });
+      if (!response.ok) throw Error();
+      const { data } = await response.json();
+      setStatus(data.status);
+      setMessage('Запит прийнято.');
+    } catch {
+      setMessage('Імпорт із YouTube недоступний. Можна імпортувати файл.');
+    } finally { setStarting(false); }
+  }
+
+  return <div>
+    <button type="button" disabled={busy || starting} onClick={() => void start()}>Імпортувати субтитри з YouTube</button>
+    <Notice message={message} />
+  </div>;
 }
 
 export function TranscriptForm({ videoId }: { videoId: string }) {

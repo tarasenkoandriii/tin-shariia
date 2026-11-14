@@ -17,6 +17,20 @@ const unknown=code=>({type:'unknown',code});
 const failed=(code,usage)=>({type:'failed',code,usage});
 const wait=(state,delay=8)=>({type:'waiting',state,delay});
 
+// Gemini's native schema does not accept all JSON Schema keywords produced by Zod.
+// Derive its supported subset from the validator instead of maintaining a second schema.
+function geminiSchema(schema) {
+  const nonNull = schema.anyOf?.filter(item => item.type !== 'null');
+  if (nonNull?.length === 1) return {...geminiSchema(nonNull[0]), nullable: true};
+  const result = {type: String(schema.type).toUpperCase()};
+  if (schema.enum) result.enum = schema.enum;
+  if (schema.required) result.required = [...schema.required];
+  if (schema.properties) result.properties = Object.fromEntries(Object.entries(schema.properties)
+    .map(([key, value]) => [key, geminiSchema(value)]));
+  if (schema.items) result.items = geminiSchema(schema.items);
+  return result;
+}
+
 function makeClient(env){
   return new GoogleGenAI({apiKey:env.GEMINI_API_KEY,httpOptions:{timeout:95000,retryOptions:{attempts:1}}});
 }
@@ -78,7 +92,8 @@ export function videoGeminiProvider(db,{env=process.env,client,sign=montageUrl}=
       }
     }catch{return failed('VIDEO_FILE_REJECTED');}
     try{
-      const outputSchema={type:'OBJECT',properties:{audioAvailable:{type:'BOOLEAN'},visualAvailable:{type:'BOOLEAN'},summary:{type:'STRING'},coverage:{type:'ARRAY',items:{type:'OBJECT',properties:{interval:{type:'INTEGER'},audio:{type:'STRING'},visual:{type:'STRING'}},required:['interval','audio','visual']}},findings:{type:'ARRAY',items:{type:'OBJECT',properties:{category:{type:'STRING',enum:['speech','pronunciation','pauses','overlap','music','subtitles','quote','attribution','context','conclusion','unsupported','metadata']},severity:{type:'STRING',enum:['critical','major','minor']},startMs:{type:'INTEGER',nullable:true},endMs:{type:'INTEGER',nullable:true},field:{type:'STRING',nullable:true},sourceIndex:{type:'INTEGER',nullable:true},observation:{type:'STRING'},fix:{type:'STRING'}},required:['category','severity','startMs','endMs','field','sourceIndex','observation','fix']}}},required:['audioAvailable','visualAvailable','summary','coverage','findings']};
+      const outputSchema = geminiSchema(videoResponseFormat.schema);
+      if (input.scoreEditing) outputSchema.required.push('editingQuality');
       const result=await ai.models.generateContent({
         model,
         contents:[{role:'user',parts:[

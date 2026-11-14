@@ -6,6 +6,8 @@ import { listShortRenders } from '../../../../db/shorts.mjs';
 import { loadPublications } from '../../../../db/publications.mjs';
 import { PublicationPanel, type Publication } from '../../publication-panel';
 import { AnalysisPanel } from '../../analysis-panel';
+import { CaptionsBookmarklet } from '../../captions-bookmarklet';
+import { captionsBookmarkletHref } from '../../../../youtube/captions-bookmarklet.mjs';
 import { ScenarioGeminiButton } from '../../scenario-gemini-button';
 import {EpisodeGrokReviewPanel,type EpisodeGrokReview} from '../../episode-grok-review-panel';
 import {listEpisodeGrokReviewsForEpisodes} from '../../../../db/episode-grok.mjs';
@@ -14,7 +16,7 @@ import { notFound, redirect } from 'next/navigation';
 import { clerkId } from '../../../../access/session';
 import { database } from '../../../../db/runtime.mjs';
 import { loadTranscript, loadWorkflow } from '../../../../db/editorial-workflow.mjs';
-import { ClaimForm, EpisodeForm, TranscriptForm, Transitions } from '../../workflow-controls';
+import { ClaimForm, EpisodeForm, TranscriptForm, Transitions, YouTubeCaptionsImport } from '../../workflow-controls';
 import { verdictLabels } from "../../workflow-types";
 import type { Claim, ClaimContent, Episode, Transcript } from '../../workflow-types';
 import type {MontagePlanOption} from '../../shorts-panel';
@@ -107,7 +109,11 @@ export default async function VideoPage({ params, searchParams }: {
     </details>
     <section>
       <h2>Розшифрування</h2>
-      {author && <TranscriptForm videoId={videoId} />}
+      {author && <>
+        {process.env.YOUTUBE_READER_TOKEN && <YouTubeCaptionsImport videoId={videoId} />}
+        <TranscriptForm videoId={videoId} />
+      </>}
+      {author && <CaptionsBookmarklet href={captionsBookmarkletHref()} youtubeId={video.youtube_id} />}
       {transcripts.length ? <ul>{transcripts.map(t=><li key={t.id}>
         <Link href={'?transcript='+t.id}>Версія {t.version} · {t.format.toUpperCase()}</Link>
       </li>)}</ul> : <p>Розшифрувань ще немає.</p>}

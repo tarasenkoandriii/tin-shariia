@@ -41,6 +41,7 @@ export async function analysisInput(request: Request) {
     if(!data||typeof data!=='object'||Array.isArray(data)
       ||(youtube?(data.transcriptId!==undefined||(data.durationSec!==undefined&&!Number.isSafeInteger(data.durationSec)))
         :typeof data.transcriptId!=='string')
+      ||(data.captions!==undefined&&(!youtube||typeof data.captions!=='boolean'))
       ||(data.retry!==undefined&&typeof data.retry!=='boolean')
       ||(data.acknowledgeUnknown!==undefined&&typeof data.acknowledgeUnknown!=='boolean')) throw Error('INVALID_INPUT');
     return data;
