@@ -3,10 +3,10 @@
 import {useMemo,useState} from 'react';
 import Link from 'next/link';
 
-type CommentRow={prepared_short_link:string|null;id:string;episode_title:string|null;parent_video_id:string;short_video_id:string;state:string;draft_text:string|null;final_text:string|null;
+type CommentRow={public_visibility:{code:string;checkedAt:string}|null;test_click_count:number;last_click_at:string|null;prepared_short_link:string|null;id:string;episode_title:string|null;parent_video_id:string;short_video_id:string;state:string;draft_text:string|null;final_text:string|null;
   scheduled_at:string|null;published_at:string|null;youtube_comment_id:string|null;error_code:string|null;click_count:number;tracking_token:string;target_kind:string;approved_channel_id:string|null;publication_steps:{phase:string;plain_verified_at:string|null;linked_verified_at:string|null;error_code:string|null}|null;verification_pending:boolean;can_recover:boolean};
 export type CommentDashboardData={settings:{enabled:boolean;interval_hours:number};connection:{channelTitle:string;channelId:string;commentScope:boolean}|null;
-  comments:CommentRow[];chart:{hour:string;clicks:number}[];candidates:{id:string;kind:'upload'|'publication';title:string;short_video_id:string;source_video_id:string}[];publishedMarkers:{id:string;parentVideoId:string;publishedAt:string;shortVideoId:string;clicks:number}[];shortLinkOrigin:string;totalClicks:number;chartEnd:string};
+  comments:CommentRow[];chart:{hour:string;clicks:number}[];candidates:{id:string;kind:'upload'|'publication';title:string;short_video_id:string;source_video_id:string}[];publishedMarkers:{id:string;parentVideoId:string;publishedAt:string;shortVideoId:string;clicks:number}[];shortLinkOrigin:string;testClicks:number;totalClicks:number;chartEnd:string};
 
 const labels:Record<string,string>={queued:'У черзі Grok',submitting:'Передається Grok',submitted:'Grok аналізує',succeeded:'Чекає схвалення',scheduled:'Заплановано',publishing:'Публікується',published:'Опубліковано',failed:'Помилка',rejected:'Відхилено',unknown:'Потрібна перевірка'};
 const stepLabels:Record<string,string>={
@@ -14,7 +14,7 @@ const stepLabels:Record<string,string>={
   link_ready:'Текст видимий · готуємо схвалене посилання',
   link_sending:'Додаємо схвалене посилання до того самого коментаря',
   waiting_link:'Перевіряємо коментар із посиланням після перезавантаження',
-  verified:'Коментар із посиланням видимий після перезавантаження',
+  verified:'Видимість із посиланням була підтверджена після перезавантаження',
   blocked:'Видимість не підтверджено · потрібна перевірка редактора',
 };
 const stamp=(value:string|null)=>value?new Intl.DateTimeFormat('uk-UA',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Kyiv'}).format(new Date(value)):'—';
@@ -31,7 +31,7 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
     YOUTUBE_COMMENT_SHORT_LINK_REQUIRED:'Спочатку скоротіть посилання та перевірте його перед схваленням.',
     YOUTUBE_COMMENT_GOOGLE_SHARE_REQUIRED:'Додайте посилання share.google, створене для адреси нашого лічильника.',
     YOUTUBE_COMMENT_GOOGLE_SHARE_UNVERIFIED:'Не вдалося підтвердити, що share.google веде саме на цей лічильник. Відправлення заблоковано.',
-    YOUTUBE_COMMENT_NOT_VISIBLE:'Публічний API YouTube не повернув цей коментар.',
+    YOUTUBE_COMMENT_NOT_VISIBLE:'Коментар більше не доступний через публічний API YouTube. Причина невідома.',
     YOUTUBE_COMMENT_LOOKUP_FAILED:'Не вдалося перевірити видимість через API YouTube.',
     YOUTUBE_COMMENT_LOOKUP_MISMATCH:'YouTube повернув коментар з іншим відео або автором.',
     YOUTUBE_COMMENT_AUTH_FAILED:'Не вдалося підготувати авторизацію YouTube.',
@@ -62,7 +62,7 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
     return {values,max,markers,start,end};
   },[data]);
   async function refresh(){const response=await fetch('/api/editorial/youtube-comments',{cache:'no-store'});if(!response.ok)throw Error('Не вдалося оновити статистику.');const body=await response.json();setData(body.data);}
-  async function post(payload:Record<string,unknown>){setBusy(true);setMessage('');try{const response=await fetch('/api/editorial/youtube-comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const body=await response.json().catch(()=>null);if(!response.ok)throw Error(body?.error?.code??'Не вдалося зберегти.');if(payload.action==='shorten'){setShortLinks(previous=>({...previous,[String(payload.id)]:body.data.url}));setMessage('Коротке посилання перевірено. Перевірте текст і схваліть публікацію.');return;}if(payload.action==='check-oauth'||payload.action==='check-published'){const code=body?.data?.code;setMessage(code==='OK'?(payload.action==='check-oauth'?'OAuth працює. Канал підтверджено.':'Публічний API YouTube повернув цей коментар.'):errors[code]??code??'Не вдалося перевірити OAuth.');return;}await refresh();setMessage('Збережено.');}catch(error){setMessage(error instanceof Error?(errors[error.message]??error.message):'Сталася помилка.');}finally{setBusy(false);}}
+  async function post(payload:Record<string,unknown>){setBusy(true);setMessage('');try{const response=await fetch('/api/editorial/youtube-comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const body=await response.json().catch(()=>null);if(!response.ok)throw Error(body?.error?.code??'Не вдалося зберегти.');if(payload.action==='tracking-probe'){const check=await fetch(body.data.url,{redirect:'manual',cache:'no-store'});if(![0,302].includes(check.status))throw Error('Не вдалося перевірити лічильник.');await refresh();setMessage('Тестовий перехід записано окремо від основного графіка.');return;}if(payload.action==='shorten'){setShortLinks(previous=>({...previous,[String(payload.id)]:body.data.url}));setMessage('Коротке посилання перевірено. Перевірте текст і схваліть публікацію.');return;}if(payload.action==='check-oauth'||payload.action==='check-published'){const code=body?.data?.code;if(payload.action==='check-published')await refresh();setMessage(code==='OK'?(payload.action==='check-oauth'?'OAuth працює. Канал підтверджено.':'Публічний API YouTube повернув цей коментар.'):errors[code]??code??'Не вдалося перевірити OAuth.');return;}await refresh();setMessage('Збережено.');}catch(error){setMessage(error instanceof Error?(errors[error.message]??error.message):'Сталася помилка.');}finally{setBusy(false);}}
   const needsScope=!data.connection?.commentScope;
   return <>
     <section className="youtube-comment-settings workflow-card">
@@ -85,8 +85,8 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
       <p className="muted">Інтервал за замовчуванням — 3 години; мінімум також 3 години, щоб не перетворювати коментарі на частий повторюваний потік. Він розділяє публікації глобально. Нова настройка діє для майбутніх схвалень; уже запланований час не пересувається.</p>
     </section>
     <section className="workflow-card youtube-click-chart">
-      <div className="youtube-chart-heading"><div><h2>Переходи з коментарів</h2><p>Останні 7 днів · кількість переходів через унікальні посилання</p></div>
-        <span>{data.totalClicks} за весь доступний період</span></div>
+      <div className="youtube-chart-heading"><div><h2>Переходи з коментарів</h2><p>Останні 7 днів · некласифіковані запити (позначені тести виключено)</p></div>
+        <span>{data.totalClicks-data.testClicks} некласифікованих · {data.testClicks} тестових за весь період</span></div>
       <div className="youtube-chart-wrap"><svg viewBox="0 0 1000 260" role="img" aria-label="Графік переходів з коментарів за 7 днів">
         {[0,1,2,3].map(line=><line key={line} x1="48" x2="985" y1={24+line*62} y2={24+line*62} className="youtube-chart-grid" />)}
         {bins.values.map((bin,index)=>{const width=937/bins.values.length,bar=Math.max(1,bin.clicks/bins.max*176);return <rect key={index} x={48+index*width+1} y={208-bar} width={Math.max(2,width-2)} height={bar} rx="2" className="youtube-chart-bar"><title>{stamp(new Date(bin.time).toISOString())}: {bin.clicks} переходів</title></rect>;})}
@@ -122,14 +122,17 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
       <p>Клікабельність посилання залежить від YouTube. Перевірте її після публікації.</p>
       {!data.comments.length&&<p>Коли буде опубліковано Shorts до основного відео, після ввімкнення розкладу Grok підготує чернетку.</p>}
       {data.comments.map(item=><article className="workflow-card youtube-comment-card" key={item.id}>
-        <header><div><h3>{item.episode_title||'Відео'}</h3><p>{item.verification_pending&&item.state==='queued'?'Перевіряємо відео через YouTube':labels[item.state]??item.state}</p></div><strong>{item.click_count} переходів</strong></header>
+        <header><div><h3>{item.episode_title||'Відео'}</h3><p>{item.public_visibility?.code==='YOUTUBE_COMMENT_NOT_VISIBLE'?'Коментар публічно недоступний':item.verification_pending&&item.state==='queued'?'Перевіряємо відео через YouTube':item.state==='published'&&item.publication_steps?.phase!=='verified'&&item.target_kind==='source'?'API прийняв · публічну видимість не підтверджено':labels[item.state]??item.state}</p></div><strong>{item.click_count} запитів до посилання</strong></header>
         <p>{item.target_kind==='source'?'Вихідне відео':'Наш основний випуск'}: <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(item.parent_video_id)}`} target="_blank" rel="noreferrer">відкрити на YouTube</a></p>
         <p>Підтверджувальний Shorts: <a href={`https://www.youtube.com/shorts/${encodeURIComponent(item.short_video_id)}`} target="_blank" rel="noreferrer">відкрити Shorts</a></p>
         <p>Канал публікації: {item.approved_channel_id??data.connection?.channelTitle??'—'}</p>
         {(item.draft_text||item.state==='succeeded')&&<blockquote><strong>Перевір текст із посиланням, який буде опубліковано:</strong><br/>{edits[item.id]?.trim()??item.draft_text}<br/><br/>
           <span>{(shortLinks[item.id]??item.prepared_short_link)?.trim() || `${data.shortLinkOrigin}/go/short/${encodeURIComponent(item.tracking_token)}`}</span></blockquote>}
         {item.final_text&&<blockquote><strong>Точний схвалений текст:</strong><br/>{item.final_text}</blockquote>}
-        <p>Опубліковано: {stamp(item.published_at)}{item.scheduled_at&&!item.published_at?` · заплановано ${stamp(item.scheduled_at)}`:''}</p>
+        {item.state==='published'&&<div className="workflow-card"><strong>Облік цього коментаря</strong><p>Коротка адреса: {item.prepared_short_link?<a href={item.prepared_short_link} target="_blank" rel="noreferrer">{item.prepared_short_link}</a>:'ще не підготовлена'}</p><p>Запитів до лічильника: {item.click_count} (тестових: {item.test_click_count??0}, некласифікованих: {item.click_count-(item.test_click_count??0)}) · останній: {stamp(item.last_click_at)}</p>{canManage&&<button type="button" disabled={busy} onClick={()=>void post({action:'tracking-probe',id:item.id})}>Перевірити лічильник (тест)</button>}<p>Підтвердження нового посилання: {item.publication_steps?.phase==='verified'?'підтверджено після перезавантаження':'ще не підтверджено'}. Попередні відкриття прямої адреси Shorts не відстежувалися.</p></div>}
+        <p>API зареєстрував публікацію: {stamp(item.published_at)}{item.scheduled_at&&!item.published_at?` · заплановано ${stamp(item.scheduled_at)}`:''}</p>
+        {item.public_visibility&&<p role="status">Перевірка публічного API · {stamp(item.public_visibility.checkedAt)} · {
+          item.public_visibility.code==='OK'?'Коментар доступний':errors[item.public_visibility.code]??item.public_visibility.code}</p>}
         {item.state==='published'&&item.youtube_comment_id&&<p>
           <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(item.parent_video_id)}&lc=${encodeURIComponent(item.youtube_comment_id)}`}
             target="_blank" rel="noreferrer">Відкрити коментар на YouTube</a>
@@ -139,6 +142,13 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
         {item.target_kind==='source'&&item.state==='succeeded'&&<p>Спочатку публікується текст без посилання.
           Після підтвердження видимості на перезавантаженій сторінці додається схвалене коротке посилання через наш лічильник.
           Потім сторінка перезавантажується для повторної перевірки.</p>}
+        {item.state==='published'&&item.target_kind==='source'&&canManage&&item.public_visibility?.code!=='YOUTUBE_COMMENT_NOT_VISIBLE'&&<details><summary>Замінити пряме посилання на коротке з обліком</summary>
+          <p>Вставте точний поточний текст коментаря з прямою адресою Shorts. Спочатку перевіримо його видимість; потім замінимо посилання й перевіримо знову.</p>
+          <label>Поточний текст<textarea value={edits[item.id]??''} onChange={e=>setEdits(previous=>({...previous,[item.id]:e.target.value}))}/></label>
+          <button type="button" disabled={busy} onClick={()=>void post({action:'shorten',id:item.id})}>Підготувати коротке посилання</button>
+          <p>Посилання: {shortLinks[item.id]??item.prepared_short_link??'ще не підготовлено'}</p>
+          <button type="button" disabled={busy||!(shortLinks[item.id]??item.prepared_short_link)||!edits[item.id]?.trim()} onClick={()=>void post({action:'replace-published-link',id:item.id,currentText:edits[item.id],shortLink:shortLinks[item.id]??item.prepared_short_link,targetVideoId:item.parent_video_id,channelId:item.approved_channel_id})}>Схвалити заміну посилання</button>
+        </details>}
         {item.publication_steps&&<p role="status">{stepLabels[item.publication_steps.phase]??item.publication_steps.phase}</p>}
         {item.error_code&&<p role="alert">{errors[item.error_code]??item.error_code}</p>}
         {item.can_recover&&canApprove&&<button type="button" disabled={busy}

@@ -183,6 +183,13 @@
       "when": 1794656000000,
       "tag": "0025_comment_publication_steps",
       "breakpoints": false
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794680000000,
+      "tag": "0026_comment_click_classification",
+      "breakpoints": false
     }
   ]
 }

@@ -1,6 +1,6 @@
 import {createCommentShortLink,verifyCommentShortLink} from '../youtube/comment-short-link.mjs';
 import {verifyYouTubeCommentTarget} from '../youtube/comment-target.mjs';
-import {randomBytes,randomUUID} from 'node:crypto';
+import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {activeMember} from '../access/membership.mjs';
 import {uuid} from '../editorial/workflow-input.mjs';
 
@@ -40,15 +40,18 @@ export async function loadYouTubeCommentDashboard(db,identity){
       (c.state='failed' AND c.published_at IS NULL AND c.youtube_thread_id IS NULL AND c.youtube_comment_id IS NULL
         AND c.error_code=ANY($1::text[])) AS can_recover,
       COALESCE((c.input_snapshot->>'verificationPending')::boolean,false) AS verification_pending,
+      c.input_snapshot->'publicVisibility' AS public_visibility,
       c.input_snapshot->>'parentTitle' AS episode_title,
       c.input_snapshot->>'preparedShortLink' AS prepared_short_link,
-      (SELECT count(*)::integer FROM youtube_short_comment_clicks x WHERE x.comment_id=c.id) AS click_count
+      (SELECT max(clicked_at) FROM youtube_short_comment_clicks x WHERE x.comment_id=c.id) AS last_click_at,
+      (SELECT count(*)::integer FROM youtube_short_comment_clicks x WHERE x.comment_id=c.id) AS click_count,
+      (SELECT count(*)::integer FROM youtube_short_comment_clicks x WHERE x.comment_id=c.id AND x.traffic_class='test') AS test_click_count
       FROM youtube_short_comments c
       ORDER BY COALESCE(c.published_at,c.scheduled_at,c.created_at) DESC LIMIT 100`,[recoverableFailures]),
     db.query(`SELECT date_trunc('hour',clicked_at) AS hour,count(*)::integer AS clicks
-      FROM youtube_short_comment_clicks WHERE clicked_at>=now()-interval '7 days'
+      FROM youtube_short_comment_clicks WHERE traffic_class='unknown' AND clicked_at>=now()-interval '7 days'
       GROUP BY 1 ORDER BY 1`),
-    db.query('SELECT count(*)::integer AS total_clicks FROM youtube_short_comment_clicks'),
+    db.query("SELECT count(*)::integer AS total_clicks,count(*) FILTER (WHERE traffic_class='test')::integer AS test_clicks FROM youtube_short_comment_clicks"),
   ]);
   const result=await db.query(`SELECT c.id,c.parent_video_id,c.published_at,c.short_video_id,count(x.id)::integer AS clicks
     FROM youtube_short_comments c LEFT JOIN youtube_short_comment_clicks x ON x.comment_id=c.id
@@ -58,7 +61,7 @@ export async function loadYouTubeCommentDashboard(db,identity){
     connection:connection?{channelTitle:connection.channel_title,channelId:connection.channel_id,commentScope:connection.scopes.includes(COMMENT_SCOPE)}:null,
     comments:comments.map(row=>({...row,click_count:Number(row.click_count)})),
     chart:chart.map(row=>({hour:row.hour,clicks:Number(row.clicks)})),
-    totalClicks:Number(clickTotals.total_clicks),
+    totalClicks:Number(clickTotals.total_clicks),testClicks:Number(clickTotals.test_clicks??0),
     chartEnd:new Date().toISOString(),
     publishedMarkers:result.rows.map(row=>({id:row.id,parentVideoId:row.parent_video_id,publishedAt:row.published_at,shortVideoId:row.short_video_id,clicks:Number(row.clicks)})),
     candidates:(await db.query(`SELECT u.id,u.kind,u.title,u.youtube_id AS short_video_id,v.youtube_id AS source_video_id
@@ -87,7 +90,7 @@ export async function prepareYouTubeCommentShortLink(db,identity,id,googleLink){
   const member=await activeMember(db,identity);
   if(!member?.roles.includes('editor'))throw Error('FORBIDDEN');
   const {rows:[row]}=await db.query("SELECT tracking_token,state,input_snapshot FROM youtube_short_comments WHERE id=$1",[uuid(id)]);
-  if(!row||row.state!=='succeeded')throw Error('YOUTUBE_COMMENT_NOT_READY');
+  if(!row||!['succeeded','published'].includes(row.state))throw Error('YOUTUBE_COMMENT_NOT_READY');
   const link=new URL('/go/short/'+encodeURIComponent(row.tracking_token),origin()).toString();
   const saved=row.input_snapshot?.preparedShortLink;
   if(saved&&!googleLink){
@@ -95,9 +98,38 @@ export async function prepareYouTubeCommentShortLink(db,identity,id,googleLink){
   }
   const result=await createCommentShortLink(link,{googleLink});
   const updated=await db.query(`UPDATE youtube_short_comments SET input_snapshot=jsonb_set(input_snapshot,
-    '{preparedShortLink}',to_jsonb($2::text)),updated_at=now() WHERE id=$1 AND state='succeeded' RETURNING id`,[uuid(id),result.url]);
+    '{preparedShortLink}',to_jsonb($2::text)),updated_at=now() WHERE id=$1 AND state IN ('succeeded','published') RETURNING id`,[uuid(id),result.url]);
   if(!updated.rows.length)throw Error('YOUTUBE_COMMENT_NOT_READY');
   return result;
+}
+
+
+export async function replacePublishedCommentLink(db,identity,id,input){
+ return db.transaction(async tx=>{
+  const member=await activeMember(tx,identity);
+  if(!member?.roles.includes('admin'))throw Error('FORBIDDEN');
+  const {rows:[row]}=await tx.query("SELECT * FROM youtube_short_comments WHERE id=$1 AND state='published' FOR UPDATE",[uuid(id)]);
+  if(!row||row.target_kind!=='source')throw Error('YOUTUBE_COMMENT_NOT_READY');
+  const commentId=input.commentId??row.youtube_comment_id;
+  if(!/^[A-Za-z0-9_-]{10,100}$/.test(commentId??'')||input.targetVideoId!==row.parent_video_id||input.channelId!==row.approved_channel_id)throw Error('YOUTUBE_COMMENT_APPROVAL_CHANGED');
+  if(commentId===row.youtube_comment_id&&row.input_snapshot?.publicVisibility?.code==='YOUTUBE_COMMENT_NOT_VISIBLE')
+    throw Error('YOUTUBE_COMMENT_NOT_VISIBLE');
+  const oldText=String(input.currentText??'').trim();
+  const direct='https://www.youtube.com/shorts/'+row.short_video_id;
+  if(!oldText.endsWith(direct))throw Error('YOUTUBE_COMMENT_APPROVAL_CHANGED');
+  const plain=commentText(oldText.slice(0,-direct.length).trim());
+  const tracking=new URL('/go/short/'+encodeURIComponent(row.tracking_token),origin()).toString();
+  const url=await verifyCommentShortLink(input.shortLink,tracking);
+  const finalText=plain+'\n\n'+url;
+  await tx.query(`INSERT INTO youtube_short_comment_events(comment_id,actor_id,action,details)
+   VALUES($1,$2,'approved',$3::text::jsonb)`,[row.id,member.id,json({operation:'replace-published-link',previousCommentId:row.youtube_comment_id,commentId,previousText:row.final_text,approvedText:finalText})]);
+  await tx.query(`UPDATE youtube_short_comments SET youtube_comment_id=$2,youtube_thread_id=$2,final_text=$3,approved_by=$4,approved_at=now(),updated_at=now(),error_code=NULL,
+    input_snapshot=CASE WHEN youtube_comment_id IS DISTINCT FROM $2 THEN input_snapshot-'publicVisibility' ELSE input_snapshot END
+    WHERE id=$1`,[row.id,commentId,finalText,member.id]);
+  await tx.query(`INSERT INTO youtube_comment_steps(comment_id,phase,plain_text,linked_text) VALUES($1,'waiting_plain',$2,$3)
+   ON CONFLICT(comment_id) DO UPDATE SET phase='waiting_plain',plain_text=$2,linked_text=$3,lease=NULL,lease_until=NULL,plain_verified_at=NULL,linked_verified_at=NULL,checked_at=NULL,error_code=NULL,updated_at=now()`,[row.id,oldText,finalText]);
+  return {id:row.id,state:'waiting_plain',url};
+ });
 }
 
 export async function approveYouTubeComment(db,identity,id,input,verify=verifyYouTubeCommentTarget){
@@ -273,11 +305,32 @@ export async function recordYouTubeCommentFailure(db,id,code,{unknown=false}={})
     [row.id,unknown?'unknown':'failed',json({errorCode:code})]);
 }
 
-export async function recordYouTubeShortCommentClick(db,token){
+export async function createCommentTrackingProbe(db,identity,id){
+ const member=await activeMember(db,identity);if(!member?.roles.includes('admin'))throw Error('FORBIDDEN');
+ const nonce=randomBytes(24).toString('base64url'),hash=createHash('sha256').update(nonce).digest('hex');
+ const {rows:[row]}=await db.query(`UPDATE youtube_short_comments SET input_snapshot=input_snapshot||$2::text::jsonb
+ WHERE id=$1 AND state='published' RETURNING tracking_token`,[uuid(id),json({probeHash:hash,probeExpires:Date.now()+300000})]);
+ if(!row)throw Error('YOUTUBE_COMMENT_NOT_READY');
+ const url=new URL('/go/short/'+row.tracking_token,origin());url.searchParams.set('probe',nonce);
+ return {url:url.href};
+}
+
+/** @param {any} db @param {string} token @param {string|null} [probe] */
+export async function recordYouTubeShortCommentClick(db,token,probe=null){
   if(typeof token!=='string'||!/^[A-Za-z0-9_-]{32,64}$/.test(token))return null;
   const {rows:[row]}=await db.query(`SELECT id,short_video_id,state FROM youtube_short_comments WHERE tracking_token=$1 AND state IN ('succeeded','published')`,[token]);
   if(!row)return null;
-  if(row.state==='published')await db.query('INSERT INTO youtube_short_comment_clicks(comment_id) VALUES($1)',[row.id]);
+  if(row.state==='published'){
+   let test=false;
+   if(typeof probe==='string'&&/^[A-Za-z0-9_-]{32}$/.test(probe)){
+    const hash=createHash('sha256').update(probe).digest('hex');
+    const result=await db.query(`UPDATE youtube_short_comments SET input_snapshot=input_snapshot-'probeHash'-'probeExpires'
+     WHERE id=$1 AND input_snapshot->>'probeHash'=$2 AND (input_snapshot->>'probeExpires')::bigint>$3 RETURNING id`,[row.id,hash,Date.now()]);
+    test=result.rows.length===1;
+   }
+   if(test)await db.query("INSERT INTO youtube_short_comment_clicks(comment_id,traffic_class) VALUES($1,'test')",[row.id]);
+   else await db.query('INSERT INTO youtube_short_comment_clicks(comment_id) VALUES($1)',[row.id]);
+  }
   return `https://www.youtube.com/shorts/${encodeURIComponent(row.short_video_id)}`;
 }
 

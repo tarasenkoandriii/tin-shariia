@@ -41,6 +41,17 @@ export async function checkPublishedYouTubeComment(db,id,{apiKey=process.env.YOU
   const {rows:[row]}=await db.query(`SELECT youtube_comment_id,parent_video_id,approved_channel_id
     FROM youtube_short_comments WHERE id=$1 AND state='published'`,[id]);
   if(!row?.youtube_comment_id) return {code:'YOUTUBE_COMMENT_NOT_READY'};
+  const checkedAt=new Date().toISOString();
+  const {code}=await lookupPublishedComment(row,{apiKey,fetchImpl});
+  await db.query(`UPDATE youtube_short_comments SET input_snapshot=jsonb_set(
+    input_snapshot,'{publicVisibility}',jsonb_build_object('code',$3::text,'checkedAt',$4::text))
+    WHERE id=$1 AND youtube_comment_id=$2 AND state='published'
+    AND COALESCE((input_snapshot->'publicVisibility'->>'checkedAt')::timestamptz,'-infinity') <= $4::timestamptz`,
+    [id,row.youtube_comment_id,code,checkedAt]);
+  return {code};
+}
+
+async function lookupPublishedComment(row,{apiKey,fetchImpl}){
   if(!apiKey) return {code:'YOUTUBE_COMMENT_LOOKUP_FAILED'};
   const url=new URL(`${API}/comments`);
   url.search=new URLSearchParams({part:'snippet',id:row.youtube_comment_id});

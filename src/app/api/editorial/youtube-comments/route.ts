@@ -4,7 +4,7 @@ import {activeMember} from '../../../../access/membership.mjs';
 import {checkPublishedYouTubeComment,checkYouTubeCommentOAuth,publishOne} from '../../../../youtube/comments.mjs';
 import {database} from '../../../../db/runtime.mjs';
 import {publicationError,publicationIdentity,publicationInput,publicationReply} from '../../../../access/publication-http';
-import {prepareYouTubeCommentShortLink,approveYouTubeComment,createYouTubeCommentDraft,loadYouTubeCommentDashboard,recoverYouTubeComment,rejectYouTubeComment,updateYouTubeCommentSettings} from '../../../../db/youtube-comments.mjs';
+import {createCommentTrackingProbe,replacePublishedCommentLink,prepareYouTubeCommentShortLink,approveYouTubeComment,createYouTubeCommentDraft,loadYouTubeCommentDashboard,recoverYouTubeComment,rejectYouTubeComment,updateYouTubeCommentSettings} from '../../../../db/youtube-comments.mjs';
 
 export const dynamic='force-dynamic';
 
@@ -21,6 +21,8 @@ export async function POST(request:Request){
       if(!member?.roles.includes('editor'))throw Error('FORBIDDEN');
       return publicationReply(input.action==='check-oauth' ? await checkYouTubeCommentOAuth(db) : await checkPublishedYouTubeComment(db,uuid(input.id)));
     }
+    if(input.action==='replace-published-link')return publicationReply(await replacePublishedCommentLink(db,identity,input.id,input));
+    if(input.action==='tracking-probe')return publicationReply(await createCommentTrackingProbe(db,identity,input.id));
     if(input.action==='shorten')return publicationReply(await prepareYouTubeCommentShortLink(db,identity,input.id,input.googleLink));
     if(input.action==='settings')return publicationReply(await updateYouTubeCommentSettings(db,identity,input));
     if(input.action==='draft'&&typeof input.generate==='boolean')return publicationReply(await createYouTubeCommentDraft(db,identity,input));

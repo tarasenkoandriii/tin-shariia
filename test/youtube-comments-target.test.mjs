@@ -112,7 +112,7 @@ test('Studio Short becomes a candidate and waits for official target verificatio
   const {registerVideo}=await import('../src/db/editorial-import.mjs');
   const {changeEditorial}=await import('../src/db/editorial-workflow.mjs');
   const {createYouTubeCommentDraft,loadYouTubeCommentDashboard,queueYouTubeCommentDrafts,
-    verifyPendingYouTubeCommentDrafts,approveYouTubeComment,recoverYouTubeComment,recordYouTubeCommentFailure,claimScheduledYouTubeComment}=await import('../src/db/youtube-comments.mjs');
+    verifyPendingYouTubeCommentDrafts,createCommentTrackingProbe,replacePublishedCommentLink,prepareYouTubeCommentShortLink,approveYouTubeComment,recoverYouTubeComment,recordYouTubeCommentFailure,claimScheduledYouTubeComment}=await import('../src/db/youtube-comments.mjs');
   const db=new PGlite(),previous=process.env.APP_ORIGIN;
   process.env.APP_ORIGIN='https://example.test';
   try{
@@ -163,6 +163,20 @@ test('Studio Short becomes a candidate and waits for official target verificatio
     assert.equal(draft.publication_id,publication.id);
     assert.match(draft.tracking_token,/^[A-Za-z0-9_-]{32}$/);
     await db.query('UPDATE youtube_comment_settings SET enabled=true');
+    const fetchBeforeShorten=globalThis.fetch;let creates=0;
+    try {
+      globalThis.fetch=async value=>{
+        const url=new URL(value);
+        if(url.pathname==='/create.php'){creates++;return Response.json({shorturl:'https://is.gd/test123'});}
+        return new Response(null,{status:302,headers:{location:'https://example.test/go/short/'+draft.tracking_token}});
+      };
+      await assert.rejects(prepareYouTubeCommentShortLink(db,'author',draft.id),/FORBIDDEN/);
+      assert.equal((await prepareYouTubeCommentShortLink(db,'reviewer',draft.id)).url,'https://is.gd/test123');
+      assert.equal((await loadYouTubeCommentDashboard(db,'reviewer')).comments[0].prepared_short_link,'https://is.gd/test123');
+      await prepareYouTubeCommentShortLink(db,'reviewer',draft.id);
+      assert.equal(creates,1,'saved link is reused without another creation');
+      assert.equal((await db.query('SELECT state FROM youtube_short_comments WHERE id=$1',[draft.id])).rows[0].state,'succeeded','shortening never publishes');
+    }finally{globalThis.fetch=fetchBeforeShorten;}
     const approval={text:input.text,targetVideoId:'SVIDu_m8UT4',channelId:'ours',
       link:'https://example.test/go/short/'+draft.tracking_token};
     await assert.rejects(approveYouTubeComment(db,'reviewer',draft.id,approval,verify),/SHORT_LINK_REQUIRED/);
@@ -209,6 +223,32 @@ test('Studio Short becomes a candidate and waits for official target verificatio
     assert.equal(await finishCommentVisibility(db,{...linkedCheck,visible:true}),true);
     assert.equal((await db.query('SELECT phase FROM youtube_comment_steps WHERE comment_id=$1',[draft.id])).rows[0].phase,'verified');
     assert.equal(await claimCommentVisibility(db),null);
+    await db.query("UPDATE youtube_short_comments SET approved_channel_id='ours' WHERE id=$1",[draft.id]);
+    await assert.rejects(createCommentTrackingProbe(db,'author',draft.id),/FORBIDDEN/);
+    await db.query("INSERT INTO member_roles VALUES($1,'admin')",[member.id]);
+    const probe=await createCommentTrackingProbe(db,'author',draft.id);
+    const probeUrl=new URL(probe.url),token=probeUrl.pathname.split('/').at(-1);
+    await recordYouTubeShortCommentClick(db,token,probeUrl.searchParams.get('probe'));
+    await recordYouTubeShortCommentClick(db,token,probeUrl.searchParams.get('probe'));
+    const traffic=await db.query('SELECT traffic_class,count(*)::int AS count FROM youtube_short_comment_clicks WHERE comment_id=$1 GROUP BY traffic_class',[draft.id]);
+    assert.equal(traffic.rows.find(r=>r.traffic_class==='test').count,1,'probe is single use');
+    assert.equal(traffic.rows.find(r=>r.traffic_class==='unknown').count,1,'replay is not trusted as test');
+    const dash=await loadYouTubeCommentDashboard(db,'author');assert.equal(dash.testClicks,1);assert.equal(dash.totalClicks,2);assert.equal(dash.comments[0].test_click_count,1);
+    const currentText=input.text+'\n\nhttps://www.youtube.com/shorts/QdaWfN4b6Bg';
+    await assert.rejects(replacePublishedCommentLink(db,'reviewer',draft.id,{}),/FORBIDDEN/);
+    const oldFetchForRepair=globalThis.fetch;
+    try{
+      globalThis.fetch=async()=>new Response(null,{status:302,headers:{location:'https://example.test/go/short/'+draft.tracking_token}});
+      const repairInput={currentText,targetVideoId:'SVIDu_m8UT4',channelId:'ours',commentId:'UgVisibleComment123',shortLink:'https://is.gd/new123'};
+      await assert.rejects(replacePublishedCommentLink(db,'author',draft.id,{...repairInput,targetVideoId:'wrong'}),/APPROVAL_CHANGED/);
+      await replacePublishedCommentLink(db,'author',draft.id,repairInput);
+      const pending=await claimCommentVisibility(db);
+      assert.equal(pending.expectedText,currentText);assert.equal(pending.commentId,'UgVisibleComment123');
+      assert.equal(await claimCommentLinkUpdate(db),null,'repair must verify existing text before editing');
+      const stored=(await db.query('SELECT final_text FROM youtube_short_comments WHERE id=$1',[draft.id])).rows[0];
+      assert.equal(stored.final_text,input.text+'\n\nhttps://is.gd/new123');
+      assert.equal((await db.query("SELECT count(*)::int AS count FROM youtube_short_comment_events WHERE details->>'operation'='replace-published-link'")).rows[0].count,1);
+    }finally{globalThis.fetch=oldFetchForRepair;}
   }finally{
     if(previous===undefined)delete process.env.APP_ORIGIN;else process.env.APP_ORIGIN=previous;
     await db.close();
@@ -246,4 +286,25 @@ test('link edit updates the existing comment and sends uncertain results to relo
   assert.equal(result.edited,0);
   assert.equal(finished[2],'YOUTUBE_COMMENT_EDIT_UNCONFIRMED');
   assert.deepEqual(await appendVisibleCommentLink(db),{edited:0});
+});
+
+test('public visibility checks preserve publication and record absence separately from API failure',async()=>{
+  const {checkPublishedYouTubeComment}=await import('../src/youtube/comments.mjs');
+  const writes=[];
+  const db={async query(sql,args){
+    if(sql.startsWith('SELECT'))return {rows:[{youtube_comment_id:'UgTest',parent_video_id:'source',approved_channel_id:'ours'}]};
+    assert.match(sql,/SET input_snapshot=jsonb_set/);
+    writes.push(args);
+    return {rows:[]};
+  }};
+  for(const [response,code] of [
+    [Response.json({items:[]}), 'YOUTUBE_COMMENT_NOT_VISIBLE'],
+    [Response.json({error:{errors:[{reason:'commentNotFound'}]}},{status:404}), 'YOUTUBE_COMMENT_NOT_VISIBLE'],
+    [Response.json({error:{}},{status:403}), 'YOUTUBE_COMMENT_LOOKUP_FAILED'],
+    [Response.json({items:[{id:'UgTest',snippet:{videoId:'source',authorChannelId:{value:'ours'}}}]}), 'OK'],
+  ]){
+    assert.deepEqual(await checkPublishedYouTubeComment(db,id,{apiKey:'test',fetchImpl:async()=>response}),{code});
+    assert.deepEqual(writes.at(-1).slice(0,3),[id,'UgTest',code]);
+    assert.ok(Number.isFinite(Date.parse(writes.at(-1)[3])));
+  }
 });

@@ -41,6 +41,7 @@ export default async function Editorial({searchParams}:{searchParams:Promise<{yo
       {member.roles.includes('publisher')&&<Link href="/editorial/youtube-comments">Коментарі та переходи</Link>}
       {member.roles.includes('publisher') && <a href="#youtube">Підключення YouTube</a>}
       {access && <a href="#team">Команда</a>}
+      {access && <Link href="/editorial/logs">Журнал проєкту</Link>}
     </nav>
     <section id="videos" className="editorial-panel" aria-labelledby="videos-title">
       <header className="editorial-section-heading">
