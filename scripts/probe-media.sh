@@ -15,6 +15,12 @@ if [[ -z "$video_stream" || -z "$audio_stream" ]]; then
   exit 3
 fi
 
+probe_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+node --input-type=module - "$probe_script_dir/../src/media/audio-timeline.mjs" "$media" <<'JS'
+const {assertContinuousAudio} = await import(process.argv[2]);
+await assertContinuousAudio(process.argv[3]);
+JS
+
 ffprobe -v error -show_entries format=duration:stream=index,codec_type,codec_name,width,height,duration -of json "$media"
 ffmpeg -nostdin -hide_banner -xerror -i "$media" \
   -map "0:$video_stream" -map "0:$audio_stream" \

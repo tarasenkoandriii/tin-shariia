@@ -1,3 +1,4 @@
+import {repairCapturedQuote, assertContinuousAudio} from '../src/media/audio-timeline.mjs';
 import {readFile, writeFile, mkdtemp, rm, access} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve, dirname, join} from 'node:path';
@@ -29,6 +30,7 @@ if (!manifest.scenes.every(scene => Number.isFinite(scene.weight) && scene.weigh
 const scratch = await mkdtemp(join(tmpdir(), 'editorial-render-'));
 const ffmpeg = args => execFileSync('ffmpeg', ['-v', 'error', '-nostdin', '-y', ...args], {stdio: 'pipe', timeout: 180000});
 try {
+  const quoteRepair = await repairCapturedQuote(local(manifest.quote.path), join(scratch, 'quote-continuous.mp4'));
   const candidates = manifest.assets.map(asset => ({...asset, path: local(asset.path)}));
   const usage = new Map(), selected = [];
   let renderedFrames = 0;
@@ -68,13 +70,14 @@ try {
   ffmpeg(['-f', 'concat', '-safe', '0', '-i', list, '-i', local(narration.path), '-map', '0:v', '-map', '1:a',
     '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-shortest', body]);
   const result = join(scratch, 'final.mp4');
-  ffmpeg(['-i', local(manifest.quote.path), '-i', body, '-filter_complex',
+  ffmpeg(['-i', quoteRepair.path, '-i', body, '-filter_complex',
     '[0:v]scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v0];[1:v]setsar=1,fps=30[v1];[v0][0:a][v1][1:a]concat=n=2:v=1:a=1[v][a]',
     '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '19', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', result]);
+  const audioTimeline = await assertContinuousAudio(result);
   // Exclusive copy also protects the earlier export if another renderer finishes concurrently.
   const {copyFile, constants} = await import('node:fs/promises');
   await copyFile(result, output, constants.COPYFILE_EXCL);
-  await writeFile(output + '.json', JSON.stringify({narrationSha256: hash, selected, technical: probe(output)}, null, 2));
+  await writeFile(output + '.json', JSON.stringify({narrationSha256: hash, quoteRepair, audioTimeline, selected, technical: probe(output)}, null, 2));
   console.log(output);
 } finally { await rm(scratch, {recursive: true, force: true}); }
