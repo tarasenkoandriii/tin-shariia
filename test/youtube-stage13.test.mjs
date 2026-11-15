@@ -48,3 +48,12 @@ test('upload reconciliation verifies both processing and the selected privacy st
     'YOUTUBE_PRIVACY_MISMATCH');
   assert.equal(youtubeProcessingOutcome({id:'abcdefghijk',status:{uploadStatus:'uploaded',privacyStatus:'private'}},'private').done,false);
 });
+
+test('an omitted YouTube disclosure stays unverified while an explicit mismatch fails',()=>{
+  const video={id:'abcdefghijk',status:{uploadStatus:'processed',privacyStatus:'public'}};
+  assert.deepEqual(youtubeProcessingOutcome(video,'public'),{
+    state:'published',done:true,status:'processed',privacy:'public',containsSyntheticMedia:null,errorCode:null,
+  });
+  assert.equal(youtubeProcessingOutcome({...video,status:{...video.status,containsSyntheticMedia:false}},'public').errorCode,
+    'YOUTUBE_AI_DISCLOSURE_MISMATCH');
+});

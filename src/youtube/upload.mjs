@@ -29,10 +29,12 @@ export function youtubeProcessingOutcome(video,expectedPrivacy,expectedSynthetic
   if(typeof video?.id!=='string'||typeof expectedPrivacy!=='string')return {state:'unknown',done:false};
   const status=video.status?.uploadStatus??'unknown';
   const privacy=video.status?.privacyStatus??null;
-  const containsSyntheticMedia=video.status?.containsSyntheticMedia===true;
+  // YouTube can omit this field even when Studio shows the disclosure.
+  const disclosed=video.status?.containsSyntheticMedia;
+  const containsSyntheticMedia=typeof disclosed==='boolean'?disclosed:null;
   if(['rejected','failed'].includes(status))return {state:'failed',done:true,status,privacy,errorCode:'YOUTUBE_PROCESSING_FAILED'};
   if(status==='processed'&&privacy!==expectedPrivacy)return {state:'failed',done:true,status,privacy,errorCode:'YOUTUBE_PRIVACY_MISMATCH'};
-  if(status==='processed'&&containsSyntheticMedia!==expectedSynthetic)return {state:'failed',done:true,status,privacy,containsSyntheticMedia,errorCode:'YOUTUBE_AI_DISCLOSURE_MISMATCH'};
+  if(status==='processed'&&containsSyntheticMedia!==null&&containsSyntheticMedia!==expectedSynthetic)return {state:'failed',done:true,status,privacy,containsSyntheticMedia,errorCode:'YOUTUBE_AI_DISCLOSURE_MISMATCH'};
   if(status==='processed')return {state:'published',done:true,status,privacy,containsSyntheticMedia,errorCode:null};
   return {state:'processing',done:false,status,privacy,containsSyntheticMedia,errorCode:null};
 }
