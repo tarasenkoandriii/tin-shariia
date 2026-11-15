@@ -81,13 +81,18 @@ async function youtubeAudio(task,dir){
  if(!await exists(youtube))await invoke(ytdlp,['--no-playlist','-f','bestaudio','--js-runtimes','node:'+process.execPath,'-o',youtube,'https://www.youtube.com/watch?v='+task.input.youtubeId]);
  const pcm=async(file,name)=>{const out=join(dir,name);await invoke('ffmpeg',['-v','error','-nostdin','-y','-i',file,'-vn','-ac','1','-ar','8000','-f','s16le',out]);const b=await readFile(out);return Array.from({length:Math.floor(b.length/16)},(_,i)=>b.readInt16LE(i*16));};
  const x=await pcm(baseline,'baseline.pcm'),y=await pcm(youtube,'youtube.pcm');
- if(Math.abs(x.length-y.length)>250)throw Error('CYCLE_YOUTUBE_AUDIO_FAILED');
  const corr=(a,b)=>{let aa=0,bb=0,ab=0;for(let i=0;i<Math.min(a.length,b.length);i++){aa+=a[i]*a[i];bb+=b[i]*b[i];ab+=a[i]*b[i];}return aa&&bb?ab/Math.sqrt(aa*bb):0;};
  let best=-1,lag=0;
  for(let shift=-150;shift<=150;shift++){const start=200,score=corr(x.slice(start,start+4000),y.slice(start+shift,start+shift+4000));if(score>best){best=score;lag=shift;}}
+ const durationDeltaMs=y.length-x.length;
+ // Ignore up to half a second of quiet padding after the aligned original.
+ const tailStart=x.length+lag;
+ const quietPadding=durationDeltaMs>250&&durationDeltaMs<=500&&tailStart>=0&&tailStart<y.length
+  &&y.slice(tailStart).every(sample=>Math.abs(sample)<=184); // −45 dBFS
+ if(Math.abs(durationDeltaMs)>250&&!quietPadding)throw Error('CYCLE_YOUTUBE_AUDIO_FAILED');
  const starts=[200,Math.floor(x.length/2),x.length-4000],correlations=starts.map(start=>corr(x.slice(start,start+3000),y.slice(start+lag,start+lag+3000)));
  if(correlations.some(c=>c<0.9))throw Error('CYCLE_YOUTUBE_AUDIO_FAILED');
- const result={audioVerified:true,correlations,alignmentMs:lag,durationDeltaMs:y.length-x.length};await writeFile(join(dir,'verification.json'),JSON.stringify(result,null,2));return result;
+ const result={audioVerified:true,correlations,alignmentMs:lag,durationDeltaMs,quietPadding};await writeFile(join(dir,'verification.json'),JSON.stringify(result,null,2));return result;
 }
 await mkdir(base,{recursive:true,mode:0o700});
 for(;;){
