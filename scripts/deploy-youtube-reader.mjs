@@ -56,7 +56,7 @@ console.log(`Reader: ${remoteDir} (project ${project}, image ${image})`);
 const staging = await mkdtemp(join(tmpdir(), 'reader-release-'));
 try {
   for (const [name, source] of Object.entries(bundle.files)) await copyFile(join(root, source), join(staging, name));
-  const tar = spawn('tar', ['-czf', '-', '-C', staging, ...names], {stdio: ['ignore', 'pipe', 'inherit'], env: {...process.env, COPYFILE_DISABLE: '1'}});
+  const tar = spawn('tar', [...(process.platform === 'darwin' ? ['--no-xattrs'] : []), '-czf', '-', '-C', staging, ...names], {stdio: ['ignore', 'pipe', 'inherit'], env: {...process.env, COPYFILE_DISABLE: '1'}});
   await ssh(['mkdir', '-p', release, '&&', 'tar', '-xzf', '-', '-C', release], {input: tar.stdout});
 } finally { await rm(staging, {recursive: true, force: true}); }
 
