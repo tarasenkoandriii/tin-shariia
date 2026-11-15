@@ -2,6 +2,7 @@
 // Runs only inside the private VPS reader container. No public listener.
 const {chromium}=require('/app/node_modules/playwright-core');
 const fs=require('node:fs/promises');
+const {prepareVideo}=require('./recovery.cjs');
 const [videoId,startRaw,endRaw,jobId]=process.argv.slice(2);
 const start=Number(startRaw),end=Number(endRaw);
 if(!/^[A-Za-z0-9_-]{11}$/.test(videoId??'')||!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||end-start>30||end>14400||!/^[a-f0-9-]{36}$/.test(jobId??''))throw Error('QUOTE_INPUT_INVALID');
@@ -15,13 +16,8 @@ if(!/^[A-Za-z0-9_-]{11}$/.test(videoId??'')||!Number.isFinite(start)||!Number.is
    const allowed=['youtube.com','googlevideo.com','ytimg.com','google.com','gstatic.com'].some(d=>u.hostname===d||u.hostname.endsWith('.'+d));
    if(u.protocol==='https:'&&(!u.port||u.port==='443')&&allowed)await route.continue();else await route.abort();
   });
-  const session=JSON.parse(await fs.readFile('/profile/session.json','utf8'));
-  await context.addCookies(session.cookies);
   const page=await context.newPage();
-  await page.goto('https://www.youtube.com/watch?v='+videoId,{waitUntil:'domcontentloaded',timeout:40000});
-  const rejectCookies=page.getByRole('button',{name:/^(Alle ablehnen|Reject all|Відхилити всі|Отклонить все)$/});
-  if(await rejectCookies.count())await rejectCookies.first().click({timeout:5000}).catch(()=>{});
-  await page.waitForFunction(()=>{const v=document.querySelector('video');return v&&v.readyState>=2&&v.duration>0;},{},{timeout:30000});
+  await prepareVideo(context,page,videoId);
   const result=await page.evaluate(async({start,end})=>{
    const v=document.querySelector('video');if(v.duration<end)throw Error('QUOTE_OUT_OF_RANGE');
    v.pause();v.playbackRate=1;v.muted=false;v.volume=1;

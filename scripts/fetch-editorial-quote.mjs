@@ -15,7 +15,16 @@ try{
  try{present=(await ssh(['docker','exec','youtube-reader-youtube-reader-1','node','-p',`"require('fs').existsSync('/reader/capture-quote.cjs')"`])).stdout.trim();}
  catch{throw Error('QUOTE_READER_UNAVAILABLE');}
  if(present!=='true'){console.error('Reader container has no /reader/capture-quote.cjs. Update it: node scripts/deploy-youtube-reader.mjs (check), then --apply.');throw Error('QUOTE_READER_SCRIPT_MISSING');}
- const {stdout}=await ssh(['docker','exec','youtube-reader-youtube-reader-1','node','/reader/capture-quote.cjs',videoId,start,end,job]);
+ let stdout;
+ for(let attempt=0;attempt<2;attempt++){
+  try{({stdout}=await ssh(['docker','exec','youtube-reader-youtube-reader-1','node','/reader/capture-quote.cjs',videoId,start,end,job]));break;}
+  catch(error){
+   let code;
+   try{code=JSON.parse(error.stdout.trim()).error;}catch{}
+   if(code==='QUOTE_PLAYBACK_TIMEOUT'&&attempt===0)continue;
+   throw Error(/^QUOTE_[A-Z_]+$/.test(code??'')?code:'QUOTE_READER_UNAVAILABLE');
+  }
+ }
  const result=JSON.parse(stdout.trim());if(!result.ok||result.path!==remote)throw Error(result.error??'QUOTE_SOURCE_UNAVAILABLE');
  // Binary output bypasses terminal logs and remains a local private file.
  const {stdout:binary}=await run('ssh',['-o','BatchMode=yes','worker-vps','docker','exec','youtube-reader-youtube-reader-1','cat',remote],{timeout:60000,maxBuffer:25*1024*1024,encoding:'buffer'});

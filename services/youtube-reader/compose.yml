@@ -8,6 +8,7 @@ services:
       - 127.0.0.1:19333:19333
     volumes:
       - ./reader.mjs:/reader/reader.mjs:ro
+      - ./recovery.cjs:/reader/recovery.cjs:ro
       - ./capture-quote.cjs:/reader/capture-quote.cjs:ro
       - ./comment-visibility.mjs:/reader/comment-visibility.mjs:ro
       - ./captions-bookmarklet.mjs:/reader/captions-bookmarklet.mjs:ro

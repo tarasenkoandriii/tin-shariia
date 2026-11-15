@@ -6,6 +6,7 @@ import { captionsBookmarklet } from './captions-bookmarklet.mjs';
 
 const require = createRequire('/app/package.json');
 const { chromium } = require('playwright-core');
+const {saveSession} = require('/reader/recovery.cjs');
 const context = await chromium.launchPersistentContext('/profile', {
   headless: true, chromiumSandbox: true, viewport: { width: 1280, height: 800 },
 });
@@ -82,10 +83,11 @@ http.createServer(async (req, res) => {
           ({ name, value, domain, path: path || '/', expires, httpOnly, secure,
             sameSite: ['Strict', 'Lax', 'None'].includes(sameSite) ? sameSite : 'Lax' }));
       if (!cookies.length) return reply(400, { error: 'NO_YOUTUBE_COOKIES' });
+      await context.storageState({path:'/profile/session.previous.json'});
+      await chmod('/profile/session.previous.json',0o600);
       await context.clearCookies();
       await context.addCookies(cookies);
-      await context.storageState({ path: '/profile/session.json' });
-      await chmod('/profile/session.json', 0o600);
+      await saveSession(context);
       return reply(200, { imported: cookies.length });
     }
     if (!/^[\w-]{11}$/.test(input.videoId ?? '')) return reply(400, { error: 'INVALID_VIDEO_ID' });
@@ -145,7 +147,7 @@ http.createServer(async (req, res) => {
           .filter(text => /transcript|расшифров|транскрип|текст відео/i.test(text)).slice(0, 5),
         timedtextRequests: performance.getEntriesByType('resource').filter(e => e.name.includes('/api/timedtext')).length };
     });
-    await context.storageState({ path: '/profile/session.json' }).then(() => chmod('/profile/session.json', 0o600)).catch(() => {});
+    await saveSession(context).catch(() => {});
     return reply(200, { ...result, diagnostics, direct });
   } catch {
     reply(502, { error: 'READER_FAILED' });

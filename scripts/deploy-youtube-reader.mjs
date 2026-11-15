@@ -64,8 +64,8 @@ try {
 const mounts = names.filter(name => name !== 'compose.yml').flatMap(name => ['-v', `${release}/${name}:/reader/${name}:ro`]);
 const probe = [
   "const {execFileSync}=await import('node:child_process');",
-  "for (const f of ['/reader/reader.mjs','/reader/poll.mjs','/reader/capture-quote.cjs']) execFileSync(process.execPath,['--check',f]);",
-  "await import('/reader/captions-bookmarklet.mjs'); await import('/reader/comment-visibility.mjs');",
+  "for (const f of ['/reader/reader.mjs','/reader/poll.mjs','/reader/capture-quote.cjs','/reader/recovery.cjs']) execFileSync(process.execPath,['--check',f]);",
+  "(await import('node:module')).createRequire('/app/package.json')('/reader/recovery.cjs'); await import('/reader/captions-bookmarklet.mjs'); await import('/reader/comment-visibility.mjs');",
   "(await import('node:module')).createRequire('/app/package.json').resolve('playwright-core');",
   "console.log('READER_PREFLIGHT_OK');",
 ].join(' ');

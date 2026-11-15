@@ -6,8 +6,15 @@
     "poll.mjs": "services/youtube-reader/poll.mjs",
     "capture-quote.cjs": "services/youtube-reader/capture-quote.cjs",
     "comment-visibility.mjs": "services/youtube-reader/comment-visibility.mjs",
-    "captions-bookmarklet.mjs": "src/youtube/captions-bookmarklet.mjs"
+    "captions-bookmarklet.mjs": "src/youtube/captions-bookmarklet.mjs",
+    "recovery.cjs": "services/youtube-reader/recovery.cjs"
   },
   "container": "youtube-reader-youtube-reader-1",
-  "mustExistInContainer": ["/reader/reader.mjs", "/reader/capture-quote.cjs", "/reader/comment-visibility.mjs", "/reader/captions-bookmarklet.mjs"]
+  "mustExistInContainer": [
+    "/reader/reader.mjs",
+    "/reader/capture-quote.cjs",
+    "/reader/comment-visibility.mjs",
+    "/reader/captions-bookmarklet.mjs",
+    "/reader/recovery.cjs"
+  ]
 }
