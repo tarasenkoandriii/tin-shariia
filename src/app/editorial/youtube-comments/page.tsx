@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import {CommentAvailabilityPanel} from './comment-availability-panel';
 import {UserButton} from '@clerk/nextjs';
 import {redirect} from 'next/navigation';
 import {activeMember} from '../../../access/membership.mjs';
@@ -18,6 +19,7 @@ export default async function YouTubeCommentsPage(){
     <header className="editorial-header"><Link href="/editorial">← До редакції</Link><UserButton /></header>
     <h1>Коментарі до випусків і вихідних відео</h1>
     <p>Grok готує доречну чернетку для опублікованого Shorts. Редактор переглядає точний текст і посилання; тільки після схвалення коментар потрапляє в чергу публікації.</p>
+    <CommentAvailabilityPanel />
     <YouTubeCommentDashboard initial={initial} canManage={member.roles.includes('admin')} canApprove={member.roles.includes('editor')} />
   </main>;
 }
