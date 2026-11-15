@@ -59,3 +59,18 @@ export async function loadProjectLog(db,identity,input={}){
  COALESCE((SELECT json_agg(page ORDER BY time DESC,key DESC) FROM page),'[]'::json) AS items`,[filters.process,filters.level,filters.q,filters.from||null,filters.to||null,(filters.page-1)*50]);
  return {...result,filters,items:result.items.map(row=>({...row,explanation:explanations[row.error_code]??null,message:states[row.state]??'Стан оновлено',error_code:/^[A-Z][A-Z0-9_]{0,99}$/.test(row.error_code??'')?row.error_code:null}))};
 }
+// Latest journal rows for the overview page: no counters and no filters, only `limit` rows leave the database.
+export async function loadRecentProjectLog(db,identity,limit=6){
+ const member=await activeMember(db,identity);
+ if(!member?.roles.includes('admin'))throw Error('FORBIDDEN');
+ const size=Math.min(20,Math.max(1,Number.parseInt(limit,10)||6));
+ const {rows}=await db.query(`WITH raw AS (${union}), latest AS (SELECT * FROM raw ORDER BY time DESC,key DESC LIMIT $1)
+ SELECT r.*,COALESCE(r.video_id,cl.video_id) AS linked_video_id,v.youtube_id,
+ left(COALESCE(ver.content->>'title',v.youtube_id,'Проєкт'),200) AS title
+ FROM latest r LEFT JOIN episodes e ON e.id=r.episode_id LEFT JOIN claims cl ON cl.id=e.claim_id
+ LEFT JOIN videos v ON v.id=COALESCE(r.video_id,cl.video_id)
+ LEFT JOIN episode_versions ver ON ver.episode_id=e.id AND ver.version=e.version
+ ORDER BY r.time DESC,r.key DESC`,[size]);
+ return rows.map(row=>({...row,level:logLevel(row.state),explanation:explanations[row.error_code]??null,message:states[row.state]??'Стан оновлено',
+  error_code:/^[A-Z][A-Z0-9_]{0,99}$/.test(row.error_code??'')?row.error_code:null}));
+}

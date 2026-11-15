@@ -7,6 +7,7 @@ import { database } from '../../../db/runtime.mjs';
 import { listShariyChannelVideos } from '../../../youtube/shariy-channel.mjs';
 import { YouTubeShortProposal } from '../youtube-short-proposal';
 import { ChannelVideos } from '../channel-videos';
+import { PageHeader } from '../ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,9 +27,8 @@ export default async function YouTubeChannelPage({ searchParams }: { searchParam
   catch (error) { errorCode = error instanceof Error ? error.message : 'YOUTUBE_READ_FAILED'; }
 
   return <main className="editorial-workspace">
-    <header className="editorial-header"><Link href="/editorial">← Відео редакції</Link><UserButton /></header>
-    <h1>Випуски каналу Анатолія Шарія</h1>
-    <p>Останні відео з YouTube. Новіші випуски зверху; сторінки містять по 20 відео.</p>
+    <PageHeader title="Випуски каналу Анатолія Шарія"
+      lead="Останні відео з YouTube. Новіші випуски зверху; сторінки містять по 20 відео." />
     {(member.roles.includes('author') || member.roles.includes('publisher')) && <YouTubeShortProposal />}
     {data ? <ChannelVideos data={data} pageToken={pageToken} /> : errorCode === 'YOUTUBE_API_NOT_CONFIGURED' ?
       <section className="workflow-card"><h2>Потрібне підключення YouTube Data API</h2>
