@@ -17,6 +17,7 @@ import { clerkId } from '../../../../access/session';
 import { database } from '../../../../db/runtime.mjs';
 import { loadTranscript, loadWorkflow } from '../../../../db/editorial-workflow.mjs';
 import { ClaimForm, EpisodeForm, TranscriptForm, Transitions, YouTubeCaptionsImport } from '../../workflow-controls';
+import { episodeStage } from '../../../../db/editorial-overview.mjs';
 import { verdictLabels } from "../../workflow-types";
 import type { Claim, ClaimContent, Episode, Transcript } from '../../workflow-types';
 import type {MontagePlanOption} from '../../shorts-panel';
@@ -104,7 +105,9 @@ export default async function VideoPage({ params, searchParams }: {
   const chosen = transcripts.find(t=>t.id===requestedTranscript);
   const segments: Segment[] = chosen ? await loadTranscript(db,id,videoId,chosen.id) : [];
   const source = 'https://www.youtube.com/watch?v='+video.youtube_id;
-  const pageTitle = episodes[0]?.content.title || claims[0]?.content.question || 'Відео '+video.youtube_id;
+  // Title of the most recently touched episode (events are newest first), as in the video list.
+  const latestEpisode = episodes.find(episode=>episode.id===events.find(event=>event.episode_id)?.episode_id) ?? episodes[0];
+  const pageTitle = latestEpisode?.content.title || claims[0]?.content.question || 'Відео '+video.youtube_id;
 
   return <main className="video-card-page">
     <PageHeader
@@ -178,8 +181,14 @@ export default async function VideoPage({ params, searchParams }: {
           const montageItems=montages.filter(item=>item.episode_id===episode.id);
           const shortsItems=shortsByEpisode.get(episode.id)??[];
           const published=byEpisode.has(episode.id);
-          const stage: Stage = published ? 'publication' : shortsItems.length ? 'shorts' : montageItems.length ? 'montage'
-            : current ? 'grok' : 'script';
+          // Same stage rule as the overview and the video list (episodeStage), from what this page already loaded.
+          const latestMontage=montageItems.filter(item=>item.episode_version===episode.version).sort((a,b)=>b.ordinal-a.ordinal)[0];
+          const latestShort=[...shortsItems].filter(item=>item.episode_version===episode.version)
+            .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)))[0];
+          const progress=episodeStage({status:episode.status,stale:episode.stale,published,grokState:current?.state??null,
+            mediaState:latestMontage?.state??null,releaseApproved:Boolean(latestMontage?.release_approved),
+            renderState:latestShort?.state??null,uploadState:latestShort?.youtube_upload_state??null});
+          const stage=progress.anchor as Stage;
           const anchor=(part: Stage)=>'episode-'+episode.id+'-'+part;
           return <article className="workflow-card video-episode" id={'episode-'+episode.id} key={episode.id}>
             <nav className="video-stages" aria-label={'Етапи сценарію «'+episode.content.title+'»'}>
@@ -187,6 +196,7 @@ export default async function VideoPage({ params, searchParams }: {
                 <a href={'#'+anchor(key)} aria-current={stage===key ? 'step' : undefined}>{label}</a>
               </li>)}</ol>
             </nav>
+            <p className="video-stage-now">Поточний етап: <Badge tone={progress.tone as Tone}>{progress.label}</Badge></p>
             <div id={anchor('script')} className="video-stage">
               <h5>{episode.content.title}</h5>
               <p className="video-status">

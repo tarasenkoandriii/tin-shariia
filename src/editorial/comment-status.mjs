@@ -33,12 +33,16 @@ export function commentStatus(row) {
     reason = phase === 'waiting_plain' ? 'Чекаємо перевірки тексту після перезавантаження'
       : phase === 'waiting_link' ? 'Чекаємо перевірки посилання після перезавантаження' : 'Додаємо схвалене посилання';
   } else {
+    // No reload check exists for this comment (main-target comments have no steps row). It is not confirmed,
+    // but nothing failed either, so it is shown in a neutral tone and does not enter the attention queue.
     value = 'not_confirmed';
     reason = row.public_visibility?.code === 'OK'
-      ? 'Публічний API повертає коментар; перевірки після перезавантаження не було'
-      : 'Перевірки після перезавантаження не було';
+      ? 'Публічний API повертає коментар; перевірки після перезавантаження для цього коментаря немає'
+      : 'Перевірки після перезавантаження для цього коментаря немає';
   }
-  const checkedAt = phase === 'verified' ? (row.publication_steps?.linked_verified_at ?? row.publication_steps?.checked_at ?? null)
-    : (row.publication_steps?.checked_at ?? row.public_visibility?.checkedAt ?? null);
-  return { send, visibility: { value, label: visibilityLabels[value], tone: visibilityTones[value], reason, checkedAt } };
+  const checkedAt = gone ? (row.public_visibility?.checkedAt ?? row.publication_steps?.checked_at ?? null)
+    : phase === 'verified' ? (row.publication_steps?.linked_verified_at ?? row.publication_steps?.checked_at ?? null)
+      : (row.publication_steps?.checked_at ?? row.public_visibility?.checkedAt ?? null);
+  const tone = value === 'not_confirmed' && !gone && phase !== 'blocked' ? 'neutral' : visibilityTones[value];
+  return { send, visibility: { value, label: visibilityLabels[value], tone, reason, checkedAt, problem: gone || phase === 'blocked' } };
 }

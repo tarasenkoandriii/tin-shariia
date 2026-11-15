@@ -59,3 +59,4 @@
   .video-stages li + li::before { display: none; }
   .video-card-page .transcript-preview { padding-left: 1.6rem; }
 }
+.video-stage-now { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .2rem 0 .8rem; color: var(--ed-muted); font-size: .88rem; }

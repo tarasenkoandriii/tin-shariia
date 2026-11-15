@@ -51,7 +51,7 @@
 .ed-brand strong { display: block; font-size: .98rem; line-height: 1.2; }
 .ed-brand small { display: block; color: var(--ed-subtle); font-size: .74rem; }
 .ed-nav { display: grid; gap: 1.15rem; }
-.ed-nav-group h2 {
+.ed-nav-label {
   margin: 0 0 .35rem; padding-inline: .6rem; font-size: .7rem; font-weight: 700; letter-spacing: .08em;
   text-transform: uppercase; color: var(--ed-subtle);
 }

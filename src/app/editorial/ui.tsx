@@ -37,7 +37,7 @@ const kyiv = new Intl.DateTimeFormat('uk-UA', { dateStyle: 'medium', timeStyle: 
 export function KyivTime({ value }: { value: string | Date | null | undefined }) {
   if (!value) return <span className="ed-meta">—</span>;
   const date = new Date(value);
-  return <time dateTime={date.toISOString()} title="Час за Києвом">{kyiv.format(date)}</time>;
+  return <time dateTime={date.toISOString()} title="Час за Києвом" suppressHydrationWarning>{kyiv.format(date)}</time>;
 }
 
 export function Thumb({ youtubeId, vertical = false, label }: { youtubeId: string | null | undefined; vertical?: boolean; label?: string }) {

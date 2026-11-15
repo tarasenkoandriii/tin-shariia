@@ -180,15 +180,19 @@ function attentionSources(roles){
       ORDER BY r.created_at DESC LIMIT ${ATTENTION_CAP}`,
     map:row=>({key:'shorts:'+row.id,kind:'episode',stage:'shorts',reason:withCode('Збірка Shorts завершилася помилкою',row.error_code),
       tone:'danger',href:episodeHref(row.video_id,row.episode_id,'shorts')})});
-    sources.push({name:'gemini',sql:`SELECT j.id,v.id AS video_id,v.youtube_id,j.status,j.error_code,j.updated_at AS time,
-        left('Відео '||v.youtube_id,200) AS title
-      FROM ai_jobs j JOIN videos v ON v.id=j.video_id
+    sources.push({name:'gemini',sql:`SELECT j.id,v.id AS video_id,v.youtube_id,j.status,j.error_code,j.updated_at AS time,j.mode,
+        m.episode_id,left('Відео '||v.youtube_id,200) AS title
+      FROM ai_jobs j JOIN videos v ON v.id=j.video_id LEFT JOIN episode_media_revisions m ON m.id=j.media_revision_id
       WHERE j.status IN ('failed','unknown') AND j.updated_at>=now()-interval '14 days'
         AND NOT EXISTS(SELECT 1 FROM ai_jobs n WHERE n.video_id=j.video_id AND n.mode=j.mode AND n.created_at>j.created_at)
       ORDER BY j.updated_at DESC LIMIT ${ATTENTION_CAP}`,
-    map:row=>({key:'gemini:'+row.id,kind:'video',stage:'analysis',
+    // A video-mode job is the pre-publication audit of a montage; it is shown in the episode's montage stage.
+    map:row=>row.mode==='video'&&row.episode_id?{key:'gemini:'+row.id,kind:'episode',stage:'montage',
+      reason:withCode(row.status==='failed'?'Аудит монтажу Gemini · помилка':'Аудит монтажу Gemini · результат невідомий',row.error_code),
+      tone:row.status==='failed'?'danger':'warning',href:episodeHref(row.video_id,row.episode_id,'montage')}
+      :{key:'gemini:'+row.id,kind:'video',stage:'analysis',
       reason:withCode(row.status==='failed'?'Аналіз Gemini · помилка':'Аналіз Gemini · результат невідомий',row.error_code),
-      tone:row.status==='failed'?'danger':'warning',href:videoHref(row.video_id,'analysis')})});
+      tone:row.status==='failed'?'danger':'warning',href:videoHref(row.video_id,'analysis')}});
     sources.push({name:'captions',sql:`SELECT c.video_id AS id,v.id AS video_id,v.youtube_id,c.error_code,c.updated_at AS time,
         left('Відео '||v.youtube_id,200) AS title
       FROM captions_import_jobs c JOIN videos v ON v.id=c.video_id WHERE c.status='failed'
@@ -206,6 +210,7 @@ function attentionSources(roles){
     reason:row.state==='failed'?withCode('Завантаження в YouTube завершилося помилкою',row.error_code)
       :withCode('Результат завантаження в YouTube невідомий — перевірте канал перед повтором',row.error_code),
     tone:row.state==='failed'?'danger':'warning',href:episodeHref(row.video_id,row.episode_id,'publication')})});
+  const canApproveComments=roles.includes('editor');
   if(roles.some(role=>COMMENT_ROLES.includes(role)))sources.push({name:'comments',sql:`SELECT c.id,c.state,c.error_code,c.published_at,
       c.updated_at AS time,c.input_snapshot->'publicVisibility' AS public_visibility,
       (SELECT row_to_json(s) FROM (SELECT phase,linked_verified_at,checked_at FROM youtube_comment_steps WHERE comment_id=c.id) s) AS publication_steps,
@@ -218,11 +223,14 @@ function attentionSources(roles){
     ORDER BY c.updated_at DESC LIMIT ${ATTENTION_CAP}`,
   map:row=>{
     const href=commentHref(row.id);
+    // Approving or recovering a comment needs the editor role (approveYouTubeComment / canApprove).
+    if(row.state==='succeeded'&&!canApproveComments)return null;
+    if((row.state==='failed'||row.state==='unknown')&&!canApproveComments)return null;
     if(row.state==='succeeded')return {key:'comment:'+row.id,kind:'comment',stage:'comments',reason:'Коментар чекає схвалення',tone:'warning',href};
     if(row.state==='failed'||row.state==='unknown')return {key:'comment:'+row.id,kind:'comment',stage:'comments',
       reason:withCode('Коментар: помилка відправлення',row.error_code),tone:row.state==='failed'?'danger':'warning',href};
     const {visibility}=commentStatus(row);
-    if(visibility?.value!=='not_confirmed')return null;
+    if(!visibility?.problem)return null;
     return {key:'comment:'+row.id,kind:'comment',stage:'comments',
       reason:'YouTube прийняв коментар, але видимість після перезавантаження не підтверджена',tone:'warning',href};
   }});
@@ -231,8 +239,11 @@ function attentionSources(roles){
 
 async function loadAttention(db,roles){
   const items=[];
-  for(const source of attentionSources(roles)){
-    const rows=await guarded('attention.'+source.name,[],async()=>(await db.query(source.sql,source.params??[])).rows);
+  const results=await Promise.all(attentionSources(roles).map(async source=>({source,
+    rows:await guarded('attention.'+source.name,null,async()=>(await db.query(source.sql,source.params??[])).rows)})));
+  // An incomplete queue must not read as «нічого не потребує уваги».
+  if(results.some(result=>result.rows===null))return null;
+  for(const {source,rows} of results){
     for(const row of rows){
       const item=source.map(row);
       if(item)items.push({key:item.key,kind:item.kind,title:trimTitle(row.title),stage:item.stage,reason:item.reason,tone:item.tone,time:iso(row.time),href:item.href});
@@ -245,7 +256,9 @@ async function loadAttention(db,roles){
 // ---------- stats ----------
 async function loadStats(db,canComments){
   const count=(section,sql,params=[])=>guarded('stats.'+section,null,async()=>num((await db.query(sql,params)).rows[0]?.n));
-  const week=new Date(Date.now()-7*24*3600*1000);
+  // Same window as the chart: the last 7 calendar days in Kyiv, today included.
+  const {rows:[{since}]}=await db.query(`SELECT (((now() AT TIME ZONE 'Europe/Kyiv')::date-6)::timestamp AT TIME ZONE 'Europe/Kyiv') AS since`);
+  const week=new Date(since);
   return {
     inReview:await count('inReview',`SELECT (SELECT count(*) FROM (SELECT 1 FROM claims WHERE status='review' LIMIT 1000) a)
       +(SELECT count(*) FROM (SELECT 1 FROM episodes WHERE status='review' LIMIT 1000) b) AS n`),
@@ -253,13 +266,14 @@ async function loadStats(db,canComments){
     publishedShorts7d:await count('publishedShorts7d',`SELECT count(DISTINCT youtube_id) AS n FROM ${publishedShorts} s WHERE s.published_at>=$1`,[week,1000]),
     verifiedComments7d:canComments?await count('verifiedComments7d',`SELECT count(*) AS n FROM (SELECT 1 FROM youtube_comment_steps s
       JOIN youtube_short_comments c ON c.id=s.comment_id
-      WHERE s.phase='verified' AND COALESCE(s.linked_verified_at,s.checked_at)>=$1 LIMIT 1000) x`,[week]):null,
+      WHERE s.phase='verified' AND COALESCE(s.linked_verified_at,s.checked_at)>=$1
+        AND COALESCE(c.input_snapshot->'publicVisibility'->>'code','')<>'YOUTUBE_COMMENT_NOT_VISIBLE' LIMIT 1000) x`,[week]):null,
   };
 }
 
 // ---------- pipeline ----------
 async function loadPipeline(db){
-  const episodes=await guarded('pipeline.episodes',[],async()=>(await db.query(`WITH candidates AS (
+  const episodes=await guarded('pipeline.episodes',null,async()=>(await db.query(`WITH candidates AS (
       SELECT episode_id AS id FROM (SELECT episode_id FROM editorial_events WHERE episode_id IS NOT NULL ORDER BY id DESC LIMIT 100) a
       UNION SELECT episode_id FROM (SELECT episode_id FROM episode_grok_reviews ORDER BY updated_at DESC LIMIT 50) b
       UNION SELECT episode_id FROM (SELECT episode_id FROM episode_media_revisions ORDER BY created_at DESC LIMIT 50) c
@@ -269,18 +283,19 @@ async function loadPipeline(db){
     SELECT *,GREATEST(event_at,grok_at,media_at,render_at,upload_at,published_at) AS time FROM detailed
     WHERE published_at IS NULL OR published_at>=now()-interval '3 days'
     ORDER BY time DESC NULLS LAST LIMIT 8`)).rows);
-  const claims=await guarded('pipeline.claims',[],async()=>(await db.query(`SELECT cl.id,cl.status,v.id AS video_id,v.youtube_id,
+  const claims=await guarded('pipeline.claims',null,async()=>(await db.query(`SELECT cl.id,cl.status,v.id AS video_id,v.youtube_id,
       left(COALESCE(${claimQuestion},'Відео '||v.youtube_id),200) AS title,
       GREATEST(v.created_at,(SELECT max(x.created_at) FROM editorial_events x WHERE x.claim_id=cl.id)) AS time
     FROM claims cl JOIN videos v ON v.id=cl.video_id
     WHERE cl.id IN (SELECT claim_id FROM (SELECT claim_id FROM editorial_events WHERE claim_id IS NOT NULL ORDER BY id DESC LIMIT 100) r)
       AND cl.status IN ('draft','review') AND NOT EXISTS(SELECT 1 FROM episodes e WHERE e.claim_id=cl.id)
     ORDER BY time DESC LIMIT 8`)).rows);
-  const videos=await guarded('pipeline.videos',[],async()=>(await db.query(`SELECT v.id,v.youtube_id,
+  const videos=await guarded('pipeline.videos',null,async()=>(await db.query(`SELECT v.id,v.youtube_id,
       GREATEST(v.created_at,(SELECT updated_at FROM captions_import_jobs c WHERE c.video_id=v.id),
         (SELECT max(j.updated_at) FROM (SELECT updated_at FROM ai_jobs WHERE video_id=v.id ORDER BY created_at DESC LIMIT 5) j)) AS time
     FROM videos v WHERE v.created_at>=now()-interval '14 days' AND NOT EXISTS(SELECT 1 FROM claims cl WHERE cl.video_id=v.id)
     ORDER BY v.created_at DESC LIMIT 8`)).rows);
+  if(!episodes||!claims||!videos)return null;
   const items=[
     ...episodes.map(row=>{const s=stageOf(row);return {key:'episode:'+row.episode_id,videoId:row.video_id,youtubeId:row.youtube_id,
       title:trimTitle(row.title),stage:s.stage,label:s.label,tone:s.tone,time:iso(row.time),href:episodeHref(row.video_id,row.episode_id,s.anchor),action:s.action};}),
@@ -333,12 +348,12 @@ const eventTones={submit:'info',approve:'success',return:'warning',withdraw:'neu
 const levelTones={error:'danger',warning:'warning',active:'active',success:'success'};
 
 async function loadEvents(db,identity,roles){
-  if(roles.includes('admin'))return guarded('events',{full:true,items:[]},async()=>{
+  if(roles.includes('admin'))return guarded('events',null,async()=>{
     const items=await loadRecentProjectLog(db,identity,6);
     return {full:true,items:items.map(row=>({key:row.key,time:iso(row.time),label:row.message,title:trimTitle(row.title),
       href:row.linked_video_id?videoHref(row.linked_video_id):null,tone:levelTones[row.level]??'neutral'}))};
   });
-  return guarded('events',{full:false,items:[]},async()=>{
+  return guarded('events',null,async()=>{
     const {rows}=await db.query(`SELECT x.id,x.claim_id,x.episode_id,x.action,x.created_at,v.id AS video_id,v.youtube_id,
         left(COALESCE(NULLIF(btrim(ev.content->>'title'),''),${claimQuestion},'Відео '||v.youtube_id),200) AS title
       FROM (SELECT * FROM editorial_events WHERE action<>'edit' ORDER BY id DESC LIMIT 6) x
@@ -363,7 +378,8 @@ async function loadSeries(db,canComments){
         FROM ${publishedShorts} s WHERE s.published_at>=$1 GROUP BY 1),
       comments AS (SELECT (COALESCE(st.linked_verified_at,st.checked_at) AT TIME ZONE 'Europe/Kyiv')::date AS day,count(*) AS n
         FROM youtube_comment_steps st JOIN youtube_short_comments c ON c.id=st.comment_id
-        WHERE $3::boolean AND st.phase='verified' AND COALESCE(st.linked_verified_at,st.checked_at)>=(SELECT since FROM bounds) GROUP BY 1)
+        WHERE $3::boolean AND st.phase='verified' AND COALESCE(st.linked_verified_at,st.checked_at)>=(SELECT since FROM bounds)
+          AND COALESCE(c.input_snapshot->'publicVisibility'->>'code','')<>'YOUTUBE_COMMENT_NOT_VISIBLE' GROUP BY 1)
       SELECT to_char(d.day,'YYYY-MM-DD') AS day,COALESCE(s.n,0) AS shorts,COALESCE(c.n,0) AS comments
       FROM days d LEFT JOIN shorts s ON s.day=d.day LEFT JOIN comments c ON c.day=d.day ORDER BY d.day LIMIT 7`,
     [new Date(Date.now()-8*24*3600*1000),1000,canComments]);
@@ -375,12 +391,15 @@ export async function loadEditorialOverview(db,identity){
   const member=await requireMember(db,identity);
   const roles=member.roles;
   const canComments=roles.some(role=>COMMENT_ROLES.includes(role));
-  const attention=await guarded('attention',{total:0,items:[]},()=>loadAttention(db,roles));
-  const stats=await loadStats(db,canComments);
-  const pipeline=await guarded('pipeline',[],()=>loadPipeline(db));
-  const publications=await guarded('publications',[],()=>loadPublications(db,canComments));
-  const events=await loadEvents(db,identity,roles);
-  const series=await loadSeries(db,canComments);
+  // Sections are independent; a failed one is null («Дані недоступні»), never an empty list.
+  const [attention,stats,pipeline,publications,events,series]=await Promise.all([
+    guarded('attention',null,()=>loadAttention(db,roles)),
+    guarded('stats',{inReview:null,inProduction:null,publishedShorts7d:null,verifiedComments7d:null},()=>loadStats(db,canComments)),
+    guarded('pipeline',null,()=>loadPipeline(db)),
+    guarded('publications',null,()=>loadPublications(db,canComments)),
+    loadEvents(db,identity,roles),
+    loadSeries(db,canComments),
+  ]);
   return {roles,generatedAt:new Date().toISOString(),attention,stats,pipeline,publications,events,series};
 }
 

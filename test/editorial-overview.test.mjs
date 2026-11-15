@@ -157,3 +157,19 @@ test('overview isolates comment data by role, counts work and limits sections',a
     assert.deepEqual(errors,[],'no section failed');
   }finally{console.error=original;await db.close();}
 });
+
+test('a failed section reads as unavailable (null), not as empty', async()=>{
+  const db=await migrated();
+  const lines=[];const original=console.error;console.error=(...args)=>{lines.push(args);};
+  try{
+    const {rows:[admin]}=await db.query("INSERT INTO members(clerk_user_id,email) VALUES('admin','admin@example.test') RETURNING id");
+    await db.query("INSERT INTO member_roles VALUES($1,'admin')",[admin.id]);
+    const broken={...db,transaction:db.transaction.bind(db),query:(sql,params)=>/FROM captions_import_jobs c JOIN videos/.test(sql)
+      ?Promise.reject(Object.assign(Error('boom secret'),{code:'42P01'})):db.query(sql,params)};
+    const data=await loadEditorialOverview(broken,'admin');
+    assert.equal(data.attention,null,'one failed attention source makes the queue unavailable');
+    assert.ok(Array.isArray(data.pipeline),'other sections still load');
+    assert.ok(lines.some(([tag,info])=>tag==='EDITORIAL_OVERVIEW_SECTION_FAILED'&&info.code==='42P01'));
+    assert.ok(!JSON.stringify(lines).includes('boom secret'),'no raw error text in logs');
+  }finally{console.error=original;await db.close();}
+});
