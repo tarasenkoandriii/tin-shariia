@@ -34,7 +34,7 @@ try {
   const candidates = manifest.assets.map(asset => ({...asset, path: local(asset.path)}));
   const usage = new Map(), selected = [];
   let renderedFrames = 0;
-  const totalFrames = Math.ceil(duration * 30);
+  const totalFrames = Math.ceil((duration + 0.35) * 30);
   for (const [index, scene] of manifest.scenes.entries()) {
     const assets = await selectCollageAssets(scene.verdict ? candidates.filter(asset => asset.kind === 'photo') : candidates,
       scene.tags, usage, scene.verdict ? 1 : scene.assetCount ?? 2);
@@ -68,7 +68,7 @@ try {
   await writeFile(list, manifest.scenes.map((_, index) => `file '${index}.mp4'`).join('\n'));
   const body = join(scratch, 'body.mp4');
   ffmpeg(['-f', 'concat', '-safe', '0', '-i', list, '-i', local(narration.path), '-map', '0:v', '-map', '1:a',
-    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-shortest', body]);
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', body]);
   const result = join(scratch, 'final.mp4');
   ffmpeg(['-i', quoteRepair.path, '-i', body, '-filter_complex',
     '[0:v]scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v0];[1:v]setsar=1,fps=30[v1];[v0][0:a][v1][1:a]concat=n=2:v=1:a=1[v][a]',
