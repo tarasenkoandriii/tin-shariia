@@ -8,7 +8,9 @@ export async function verifyCommentAfterReload(page,input){
   await page.reload({waitUntil:'domcontentloaded',timeout:30000});
   for(const frame of page.frames()){
     const rejectCookies=frame.getByText(/^(Alle ablehnen|Reject all|Відхилити всі|Отклонить все)$/);
-    if(await rejectCookies.count())await rejectCookies.first().click({timeout:10000,force:true}).catch(()=>console.info('COMMENT_CONSENT_CLICK_FAILED'));
+    // YouTube may replace an ad/consent frame during navigation.
+    try{if(await rejectCookies.count())await rejectCookies.first().click({timeout:10000,force:true});}
+    catch{console.info('COMMENT_CONSENT_FRAME_CHANGED');}
   }
   await page.waitForTimeout(1500);
   const comments=page.locator('ytd-comments#comments');
@@ -23,11 +25,29 @@ export async function verifyCommentAfterReload(page,input){
       const content=element.querySelector('#content-text');
       const link=element.querySelector('#author-text');
       return {text:content?.textContent??'',author:link?.getAttribute('href'),
-        channel:renderer?.data?.authorEndpoint?.browseEndpoint?.browseId??null};
+        channel:renderer?.data?.authorEndpoint?.browseEndpoint?.browseId
+          ??renderer?.data?.authorText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId
+          ??renderer?.data?.authorName?.commandRuns?.[0]?.onTap?.innertubeCommand?.browseEndpoint?.browseId
+          ??link?.getAttribute('href')?.match(/\/channel\/(UC[\w-]+)/)?.[1]??null};
     });
+    // Current YouTube view-models may expose only an @handle. Resolve its
+    // public channel metadata rather than trusting a display name.
+    if(!found.channel && /^\/@[^/?#]+$/.test(found.author??'')){
+      const profile=await page.context().newPage();
+      try{
+        await profile.goto('https://www.youtube.com'+found.author,{waitUntil:'domcontentloaded',timeout:20000});
+        const decline=profile.getByRole('button',{name:/^(Alle ablehnen|Reject all|Відхилити всі|Отклонить все)$/});
+        if(await decline.count()){await decline.first().click();await profile.waitForURL(url=>url.hostname==='www.youtube.com',{timeout:20000});}
+        const html=await profile.content();
+        found.channel=await profile.evaluate(()=>globalThis.ytInitialData?.metadata?.channelMetadataRenderer?.externalId??null)
+          ??html.match(/"channelMetadataRenderer":\s*\{[^}]*"externalId":\s*"(UC[\w-]+)"/)?.[1]
+          ??html.match(/<meta[^>]+itemprop="channelId"[^>]+content="(UC[\w-]+)"/)?.[1]??null;
+        if(!found.channel)console.info('COMMENT_AUTHOR_METADATA_UNAVAILABLE',{url:profile.url(),title:await profile.title()});
+      }finally{await profile.close();}
+    }
     const normalize=value=>value.replace(/\s+/g,' ').trim();
     const textMatches=normalize(found.text)===normalize(input.expectedText),authorMatches=found.channel===input.channelId;
-    console.info('COMMENT_VERIFY_DIAGNOSTIC',{commentId:input.commentId,textMatches,authorMatches,textLength:found.text.length,expectedLength:input.expectedText.length});
+    console.info('COMMENT_VERIFY_DIAGNOSTIC',{commentId:input.commentId,textMatches,authorMatches,textLength:found.text.length,expectedLength:input.expectedText.length,author:found.author,channel:found.channel});
     return textMatches&&authorMatches;
   }catch(error){
     console.info('COMMENT_VERIFY_DIAGNOSTIC',{commentId:input.commentId,reason:'PAGE_OR_COMMENT_UNAVAILABLE',type:error.name,step:String(error.message).split('\n')[0].slice(0,180)});

@@ -24,3 +24,16 @@ test('uses fresh incognito context and closes it even on failed verification',as
  page.goto=async()=>{throw Error('offline');};
  assert.equal(await verifyCommentInIncognito(browser,input),false);assert.equal(events.at(-1),'closed');
 });
+
+test('detached consent iframe does not abort the comment check',async()=>{
+ const {page}=mock();page.frames=()=>[{getByText(){return {async count(){throw Error('Frame was detached');}};}}];
+ assert.equal(await verifyCommentAfterReload(page,input),true);
+});
+
+test('resolves public handle metadata and still rejects another channel',async()=>{
+ const {page}=mock();const locator=page.locator.bind(page);
+ page.locator=selector=>{const result=locator(selector);if(selector!=='ytd-comments#comments')result.evaluate=async()=>({text:input.expectedText,channel:null,author:'/@example'});return result;};
+ page.context=()=>({newPage:async()=>({goto:async url=>assert.equal(url,'https://www.youtube.com/@example'),getByRole:()=>({count:async()=>0}),evaluate:async()=>null,content:async()=>'"channelMetadataRenderer":{"externalId":"UCours"}',close:async()=>{}})});
+ assert.equal(await verifyCommentAfterReload(page,{...input,channelId:'UCours'}),true);
+ assert.equal(await verifyCommentAfterReload(page,{...input,channelId:'UCother'}),false);
+});
