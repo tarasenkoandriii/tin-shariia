@@ -82,7 +82,7 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ed-topbar-title span { color: var(--ed-subtle); font-weight: 500; }
 .ed-shell .ed-menu-button { display: none; }
-.ed-shell a.ed-skip { position: absolute; left: .75rem; top: -3rem; z-index: 30; padding: .5rem .9rem; border-radius: var(--ed-radius-sm);
+.ed-shell a.ed-skip { position: absolute; left: .75rem; top: -5rem; z-index: 30; padding: .5rem .9rem; border-radius: var(--ed-radius-sm);
   background: var(--ed-accent); color: var(--ed-accent-ink); font-weight: 700; text-decoration: none; }
 .ed-shell a.ed-skip:focus { top: .6rem; }
 .ed-content { position: relative; flex: 1; padding: clamp(1rem, 3vw, 2.25rem) clamp(1rem, 3vw, 2.25rem) 4rem; }
@@ -188,7 +188,7 @@
 /* Mobile: the sidebar becomes a disclosure menu under the top bar. */
 @media (max-width: 900px) {
   .ed-shell { grid-template-columns: minmax(0, 1fr); background: var(--ed-bg); }
-  .ed-sidebar { position: fixed; inset: 3.6rem 0 0 0; z-index: 20; height: auto; border-right: 0; display: none; background: #0f171b; }
+  .ed-sidebar { position: fixed; top: 3.6rem; left: 0; right: 0; bottom: 0; z-index: 20; height: calc(100dvh - 3.6rem); border-right: 0; display: none; background: #0f171b; }
   .ed-shell[data-menu="open"] .ed-sidebar { display: flex; }
   .ed-sidebar .ed-brand { display: none; }
   .ed-shell .ed-menu-button { display: inline-flex; }

@@ -18,7 +18,8 @@ export function EditorialShell({ roles, account, children }: { roles: string[]; 
   const menu = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!open) return;
-    menu.current?.querySelector<HTMLElement>('a[aria-current="page"], a')?.focus();
+    const links = menu.current?.querySelectorAll<HTMLElement>('.ed-nav-link');
+    (menu.current?.querySelector<HTMLElement>('.ed-nav-link[aria-current="page"]') ?? links?.[0])?.focus();
     const close = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setOpenOn(null);
