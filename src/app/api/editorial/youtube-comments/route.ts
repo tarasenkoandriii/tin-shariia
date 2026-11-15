@@ -1,7 +1,7 @@
 import {uuid} from '../../../../editorial/workflow-input.mjs';
 import {after} from 'next/server';
 import {activeMember} from '../../../../access/membership.mjs';
-import {checkPublishedYouTubeComment,checkYouTubeCommentOAuth,publishOne} from '../../../../youtube/comments.mjs';
+import {removePublishedCommentLinks,checkPublishedYouTubeComment,checkYouTubeCommentOAuth,publishOne} from '../../../../youtube/comments.mjs';
 import {database} from '../../../../db/runtime.mjs';
 import {publicationError,publicationIdentity,publicationInput,publicationReply} from '../../../../access/publication-http';
 import {createCommentTrackingProbe,replacePublishedCommentLink,prepareYouTubeCommentShortLink,approveYouTubeComment,createYouTubeCommentDraft,loadYouTubeCommentDashboard,recoverYouTubeComment,rejectYouTubeComment,updateYouTubeCommentSettings} from '../../../../db/youtube-comments.mjs';
@@ -21,6 +21,7 @@ export async function POST(request:Request){
       if(!member?.roles.includes('editor'))throw Error('FORBIDDEN');
       return publicationReply(input.action==='check-oauth' ? await checkYouTubeCommentOAuth(db) : await checkPublishedYouTubeComment(db,uuid(input.id)));
     }
+    if(input.action==='remove-links')return publicationReply(await removePublishedCommentLinks(db,identity,uuid(input.id)));
     if(input.action==='replace-published-link')return publicationReply(await replacePublishedCommentLink(db,identity,input.id,input));
     if(input.action==='tracking-probe')return publicationReply(await createCommentTrackingProbe(db,identity,input.id));
     if(input.action==='shorten')return publicationReply(await prepareYouTubeCommentShortLink(db,identity,input.id,input.googleLink));

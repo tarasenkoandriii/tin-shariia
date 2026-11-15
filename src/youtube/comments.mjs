@@ -1,3 +1,4 @@
+import {activeMember} from '../access/membership.mjs';
 import {claimCommentLinkUpdate,finishCommentLinkUpdate} from '../db/youtube-comment-steps.mjs';
 import {requestGrokDirect} from '../analysis/grok-direct.mjs';
 import {verifyYouTubeCommentTarget} from './comment-target.mjs';
@@ -149,4 +150,45 @@ export async function dispatchYouTubeComments(db){
   const editing=await appendVisibleCommentLink(db);
   const publication=await publishOne(db);
   return {polled,submitted,completed,failed,...editing,...verification,skipped:!grokBatchConfigured()?'GROK_NOT_CONFIGURED':null,...publication};
+}
+
+
+export async function removePublishedCommentLinks(db, identity, id) {
+  const member = await activeMember(db, identity);
+  if (!member?.roles.includes('editor')) throw Error('FORBIDDEN');
+  return db.transaction(async tx => {
+    const {rows: [row]} = await tx.query(`SELECT c.*, y.channel_id, y.scopes, y.refresh_token_encrypted
+      FROM youtube_short_comments c JOIN youtube_connections y ON y.disconnected_at IS NULL
+      WHERE c.id=$1 AND c.state='published' FOR UPDATE OF c`, [id]);
+    if (!row?.youtube_comment_id) throw Error('YOUTUBE_COMMENT_NOT_READY');
+    if (row.channel_id !== row.approved_channel_id) throw Error('YOUTUBE_COMMENT_APPROVAL_CHANGED');
+    const token = await defaultAccessToken(row);
+    const headers = {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'};
+    const lookup = await fetch(API + '/comments?' + new URLSearchParams({part:'snippet',id:row.youtube_comment_id}),
+      {headers,cache:'no-store',signal:AbortSignal.timeout(10000)});
+    const found = await lookup.json().catch(() => null);
+    const comment = found?.items?.find(item => item.id === row.youtube_comment_id);
+    let code = lookup.ok ? (comment ? null : 'YOUTUBE_COMMENT_NOT_FOUND') : 'YOUTUBE_COMMENT_LOOKUP_FAILED';
+    if (comment && comment.snippet?.authorChannelId?.value !== row.approved_channel_id) code = 'YOUTUBE_COMMENT_APPROVAL_CHANGED';
+    const plainText = String(row.final_text ?? '').replace(/https?:\/\/\S+/g, '').trim();
+    if (!plainText) throw Error('INVALID_INPUT');
+    if (!code) {
+      try {
+        const response = await fetch(API + '/comments?part=snippet', {method:'PUT',headers,
+          body:JSON.stringify({id:row.youtube_comment_id,snippet:{textOriginal:plainText}}),
+          cache:'no-store',signal:AbortSignal.timeout(20000)});
+        const body = await response.json().catch(() => null);
+        code = response.ok && body?.id === row.youtube_comment_id ? 'OK' : 'YOUTUBE_COMMENT_EDIT_REJECTED';
+      } catch { code = 'YOUTUBE_COMMENT_EDIT_UNKNOWN'; }
+    }
+    const result = {code,checkedAt:new Date().toISOString(),commentId:row.youtube_comment_id};
+    await tx.query(`UPDATE youtube_short_comments SET input_snapshot=jsonb_set(input_snapshot,
+      '{linkRemoval}',$2::text::jsonb),updated_at=now() WHERE id=$1`, [id,JSON.stringify(result)]);
+    if (code === 'OK') {
+      await tx.query('UPDATE youtube_short_comments SET final_text=$2 WHERE id=$1',[id,plainText]);
+      await tx.query(`UPDATE youtube_comment_steps SET phase='blocked',error_code='LINK_REMOVED_BY_EDITOR',
+        checked_at=now() WHERE comment_id=$1`,[id]);
+    }
+    return result;
+  });
 }
