@@ -1,0 +1,13 @@
+{
+  "comment": "Files copied to the VPS reader directory by scripts/deploy-youtube-reader.sh. Keys are names on the VPS, values are repository paths.",
+  "files": {
+    "compose.yml": "services/youtube-reader/compose.yml",
+    "reader.mjs": "services/youtube-reader/reader.mjs",
+    "poll.mjs": "services/youtube-reader/poll.mjs",
+    "capture-quote.cjs": "services/youtube-reader/capture-quote.cjs",
+    "comment-visibility.mjs": "services/youtube-reader/comment-visibility.mjs",
+    "captions-bookmarklet.mjs": "src/youtube/captions-bookmarklet.mjs"
+  },
+  "container": "youtube-reader-youtube-reader-1",
+  "mustExistInContainer": ["/reader/reader.mjs", "/reader/capture-quote.cjs", "/reader/comment-visibility.mjs", "/reader/captions-bookmarklet.mjs"]
+}

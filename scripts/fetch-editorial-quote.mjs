@@ -10,6 +10,11 @@ const target=resolve(output),job=randomUUID(),remote='/tmp/editorial-quote-'+job
 try{await access(target);throw Error('OUTPUT_ALREADY_EXISTS');}catch(e){if(e.code!=='ENOENT')throw e;}
 const ssh=async args=>run('ssh',['-o','BatchMode=yes','-o','ConnectTimeout=10','worker-vps',...args],{timeout:110000,maxBuffer:500000});
 try{
+ // A reader started from an older compose file has no capture script; say so instead of a generic failure.
+ let present;
+ try{present=(await ssh(['docker','exec','youtube-reader-youtube-reader-1','node','-p',`"require('fs').existsSync('/reader/capture-quote.cjs')"`])).stdout.trim();}
+ catch{throw Error('QUOTE_READER_UNAVAILABLE');}
+ if(present!=='true'){console.error('Reader container has no /reader/capture-quote.cjs. Update it: node scripts/deploy-youtube-reader.mjs (check), then --apply.');throw Error('QUOTE_READER_SCRIPT_MISSING');}
  const {stdout}=await ssh(['docker','exec','youtube-reader-youtube-reader-1','node','/reader/capture-quote.cjs',videoId,start,end,job]);
  const result=JSON.parse(stdout.trim());if(!result.ok||result.path!==remote)throw Error(result.error??'QUOTE_SOURCE_UNAVAILABLE');
  // Binary output bypasses terminal logs and remains a local private file.
