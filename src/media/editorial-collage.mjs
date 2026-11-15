@@ -66,7 +66,7 @@ export async function renderEditorialCollage(scene, assets) {
   });
   const layers = await Promise.all(assets.map(async (asset, index) => ({
     input: await sharp(asset.path).resize(boxes[index].width, boxes[index].height, {
-      fit: asset.kind === 'map' ? 'contain' : 'cover', background: '#dce8eb',
+      fit: ['map', 'document'].includes(asset.kind) ? 'contain' : 'cover', background: '#dce8eb',
     }).png().toBuffer(), left: boxes[index].left, top: boxes[index].top,
   })));
   const title = verdict
@@ -90,7 +90,7 @@ export async function renderEditorialCarousel(scene, assets) {
   const layers = [];
   for (const [index, asset] of cards.entries()) {
     const image = await sharp(asset.path).resize(cardWidth, 386, {
-      fit: asset.kind === 'map' ? 'contain' : 'cover', background: '#dce8eb',
+      fit: ['map', 'document'].includes(asset.kind) ? 'contain' : 'cover', background: '#dce8eb',
     }).png().toBuffer();
     const caption = Buffer.from(`<svg width="360" height="44"><rect width="360" height="44" fill="#102431"/><text x="180" y="27" text-anchor="middle" font-family="Arial" font-size="13" fill="#a4bfc7">${xml(asset.credit)}</text></svg>`);
     layers.push({input: image, left: index * step, top: 0},
