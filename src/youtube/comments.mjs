@@ -9,7 +9,7 @@ import {claimScheduledYouTubeComment,completeYouTubeCommentDraftBatch,queueYouTu
 import {grokBatchConfigured,readGrokBatch,readGrokBatchResults} from '../analysis/grok-batch.mjs';
 
 const API='https://www.googleapis.com/youtube/v3';
-const system=`Write one concise, factual Ukrainian YouTube comment (1-2 sentences) under the specified target video, explaining what its related Short adds or illustrates. Use only the supplied approved script and claim context; do not add facts, accusations, hashtags, calls for likes, or external links. Keep it specific to these videos and natural, never a repeated template. Return JSON only: {"comment":"..."}. The application will append a tracked Short link after an editor reviews and approves the exact final comment.`;
+const system=`Write one concise, factual Ukrainian YouTube comment (1-2 sentences) under the specified target video, explaining what its related Short adds or illustrates. Use only the supplied approved script and claim context; do not add facts, accusations, hashtags, calls for likes, or external links. Keep it specific to these videos and natural, never a repeated template. Return JSON only: {"comment":"..."}. The application will append a direct YouTube Short link without a URL scheme after an editor reviews and approves the exact final comment.`;
 const bounded=value=>{const text=JSON.stringify(value);return text.length>10000?text.slice(0,10000)+'…':text;};
 
 const defaultAccessToken=row=>refreshYouTubeAccessToken(decryptYouTubeSecret(row.refresh_token_encrypted),youtubeOAuthConfig());
@@ -75,6 +75,8 @@ export async function publishOne(db,{verify=verifyYouTubeCommentTarget,fetchImpl
   let targetChannelId,token;
   try {
     if(row.approved_channel_id && row.approved_channel_id!==row.channel_id) throw Error('YOUTUBE_COMMENT_APPROVAL_CHANGED');
+    if(!String(row.final_text??'').endsWith('\n\nyoutube.com/shorts/'+row.short_video_id))
+      throw Error('YOUTUBE_COMMENT_APPROVAL_CHANGED');
     targetChannelId=await verify(row);
     token=await accessToken(row);
   } catch(error){
@@ -86,7 +88,7 @@ export async function publishOne(db,{verify=verifyYouTubeCommentTarget,fetchImpl
   try{
     const url=new URL(`${API}/commentThreads`);url.searchParams.set('part','snippet');
     response=await fetchImpl(url,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
-      body:JSON.stringify({snippet:{channelId:targetChannelId,videoId:row.parent_video_id,topLevelComment:{snippet:{textOriginal:row.plain_text??row.final_text}}}}),cache:'no-store',signal:AbortSignal.timeout(20000)});
+      body:JSON.stringify({snippet:{channelId:targetChannelId,videoId:row.parent_video_id,topLevelComment:{snippet:{textOriginal:row.final_text}}}}),cache:'no-store',signal:AbortSignal.timeout(20000)});
     body=await response.json().catch(()=>null);
   }catch{
     await recordYouTubeCommentFailure(db,row.id,'YOUTUBE_COMMENT_OUTCOME_UNKNOWN',{unknown:true});
@@ -147,7 +149,8 @@ export async function dispatchYouTubeComments(db){
     await completeYouTubeCommentDirect(db,job.id,result);
     if(result.error)failed++;else completed++;
   }
-  const editing=await appendVisibleCommentLink(db);
+  // Link edits are disabled: publish the approved direct-link text in one request.
+  const editing={edited:0};
   const publication=await publishOne(db);
   return {polled,submitted,completed,failed,...editing,...verification,skipped:!grokBatchConfigured()?'GROK_NOT_CONFIGURED':null,...publication};
 }

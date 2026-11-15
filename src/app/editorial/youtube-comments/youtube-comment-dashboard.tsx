@@ -127,9 +127,9 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
         <p>Підтверджувальний Shorts: <a href={`https://www.youtube.com/shorts/${encodeURIComponent(item.short_video_id)}`} target="_blank" rel="noreferrer">відкрити Shorts</a></p>
         <p>Канал публікації: {item.approved_channel_id??data.connection?.channelTitle??'—'}</p>
         {(item.draft_text||item.state==='succeeded')&&<blockquote><strong>Перевір текст із посиланням, який буде опубліковано:</strong><br/>{edits[item.id]?.trim()??item.draft_text}<br/><br/>
-          <span>{(shortLinks[item.id]??item.prepared_short_link)?.trim() || `${data.shortLinkOrigin}/go/short/${encodeURIComponent(item.tracking_token)}`}</span></blockquote>}
+          <span>{`youtube.com/shorts/${item.short_video_id}`}</span></blockquote>}
         {item.final_text&&<blockquote><strong>Точний схвалений текст:</strong><br/>{item.final_text}</blockquote>}
-        {item.state==='published'&&<div className="workflow-card"><strong>Облік цього коментаря</strong><p>Коротка адреса: {item.prepared_short_link?<a href={item.prepared_short_link} target="_blank" rel="noreferrer">{item.prepared_short_link}</a>:'ще не підготовлена'}</p><p>Запитів до лічильника: {item.click_count} (тестових: {item.test_click_count??0}, некласифікованих: {item.click_count-(item.test_click_count??0)}) · останній: {stamp(item.last_click_at)}</p>{canManage&&<button type="button" disabled={busy} onClick={()=>void post({action:'tracking-probe',id:item.id})}>Перевірити лічильник (тест)</button>}<p>Підтвердження нового посилання: {item.publication_steps?.phase==='verified'?'підтверджено після перезавантаження':'ще не підтверджено'}. Попередні відкриття прямої адреси Shorts не відстежувалися.</p></div>}
+        {item.state==='published'&&<div className="workflow-card"><strong>Облік цього коментаря</strong><p>Нові прямі посилання YouTube не проходять через лічильник. Нижче збережена статистика попередніх перенаправлень.</p><p>Коротка адреса: {item.prepared_short_link?<a href={item.prepared_short_link} target="_blank" rel="noreferrer">{item.prepared_short_link}</a>:'ще не підготовлена'}</p><p>Запитів до лічильника: {item.click_count} (тестових: {item.test_click_count??0}, некласифікованих: {item.click_count-(item.test_click_count??0)}) · останній: {stamp(item.last_click_at)}</p>{canManage&&<button type="button" disabled={busy} onClick={()=>void post({action:'tracking-probe',id:item.id})}>Перевірити лічильник (тест)</button>}<p>Підтвердження нового посилання: {item.publication_steps?.phase==='verified'?'підтверджено після перезавантаження':'ще не підтверджено'}. Попередні відкриття прямої адреси Shorts не відстежувалися.</p></div>}
         <p>API зареєстрував публікацію: {stamp(item.published_at)}{item.scheduled_at&&!item.published_at?` · заплановано ${stamp(item.scheduled_at)}`:''}</p>
         {item.public_visibility&&<p role="status">Перевірка публічного API · {stamp(item.public_visibility.checkedAt)} · {
           item.public_visibility.code==='OK'?'Коментар доступний':errors[item.public_visibility.code]??item.public_visibility.code}</p>}
@@ -139,16 +139,7 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
           {canApprove&&<button type="button" disabled={busy}
             onClick={()=>void post({action:'check-published',id:item.id})}>Перевірити видимість</button>}
         </p>}
-        {item.target_kind==='source'&&item.state==='succeeded'&&<p>Спочатку публікується текст без посилання.
-          Після підтвердження видимості на перезавантаженій сторінці додається схвалене коротке посилання через наш лічильник.
-          Потім сторінка перезавантажується для повторної перевірки.</p>}
-        {item.state==='published'&&item.target_kind==='source'&&canManage&&item.public_visibility?.code!=='YOUTUBE_COMMENT_NOT_VISIBLE'&&<details><summary>Замінити пряме посилання на коротке з обліком</summary>
-          <p>Вставте точний поточний текст коментаря з прямою адресою Shorts. Спочатку перевіримо його видимість; потім замінимо посилання й перевіримо знову.</p>
-          <label>Поточний текст<textarea value={edits[item.id]??''} onChange={e=>setEdits(previous=>({...previous,[item.id]:e.target.value}))}/></label>
-          <button type="button" disabled={busy} onClick={()=>void post({action:'shorten',id:item.id})}>Підготувати коротке посилання</button>
-          <p>Посилання: {shortLinks[item.id]??item.prepared_short_link??'ще не підготовлено'}</p>
-          <button type="button" disabled={busy||!(shortLinks[item.id]??item.prepared_short_link)||!edits[item.id]?.trim()} onClick={()=>void post({action:'replace-published-link',id:item.id,currentText:edits[item.id],shortLink:shortLinks[item.id]??item.prepared_short_link,targetVideoId:item.parent_video_id,channelId:item.approved_channel_id})}>Схвалити заміну посилання</button>
-        </details>}
+        {item.state==='succeeded'&&<p>Публікуємо одразу з прямим посиланням YouTube без https://. Потім перевіряємо точний текст після перезавантаження в окремій сесії без авторизації. Переходи за прямим посиланням не відстежуються.</p>}
         {item.state==='published'&&canApprove&&<button type="button" disabled={busy}
           onClick={()=>void post({action:'remove-links',id:item.id})}>Прибрати посилання з коментаря</button>}
         {item.publication_steps&&<p role="status">{stepLabels[item.publication_steps.phase]??item.publication_steps.phase}</p>}
@@ -160,21 +151,17 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
               setShortLinks(previous=>({...previous,[item.id]:previousLink}));
             void post({action:'recover',id:item.id});
           }}>Повернути на схвалення</button>}
-        {item.state==='succeeded'&&item.target_kind==='source'&&<p>Натисніть «Скоротити посилання». Перевірене share.google має пріоритет; інакше використовується безкоштовний скорочувач. До схвалення ви побачите точну адресу.</p>}
         {item.state==='succeeded'&&canApprove&&<div className="youtube-comment-actions">
           <label>Текст коментаря <textarea maxLength={1200} value={edits[item.id]??item.draft_text??''}
             onChange={event=>setEdits(previous=>({...previous,[item.id]:event.target.value}))} /></label>
           <button type="button" disabled={busy||!data.settings.enabled||needsScope||!(edits[item.id]??item.draft_text)?.trim()}
             onClick={()=>void post({action:'approve',id:item.id,text:edits[item.id]??item.draft_text,
               targetVideoId:item.parent_video_id,channelId:data.connection?.channelId,shortLink:(shortLinks[item.id]??item.prepared_short_link)?.trim(),
-              link:`${data.shortLinkOrigin}/go/short/${encodeURIComponent(item.tracking_token)}`})}>Схвалити й запланувати</button>
-          <button type="button" disabled={busy} onClick={()=>void post({action:'shorten',id:item.id,googleLink:shortLinks[item.id]?.trim()})}>Скоротити посилання</button>
-          {<label>{item.target_kind==='source'?'Коротке посилання (Google — пріоритет)':'Коротке посилання TinyURL'} <input type="url" value={shortLinks[item.id]??item.prepared_short_link??''}
-            onChange={event=>setShortLinks(previous=>({...previous,[item.id]:event.target.value}))} /></label>}
+              link:`youtube.com/shorts/${item.short_video_id}`})}>Схвалити й запланувати</button>
           <button type="button" disabled={busy||needsScope||!(edits[item.id]??item.draft_text)?.trim()}
             onClick={()=>void post({action:'approve',id:item.id,publishNow:true,text:edits[item.id]??item.draft_text,
               targetVideoId:item.parent_video_id,channelId:data.connection?.channelId,shortLink:(shortLinks[item.id]??item.prepared_short_link)?.trim(),
-              link:`${data.shortLinkOrigin}/go/short/${encodeURIComponent(item.tracking_token)}`})}>Схвалити й опублікувати</button>
+              link:`youtube.com/shorts/${item.short_video_id}`})}>Схвалити й опублікувати</button>
           <button type="button" className="secondary-button" disabled={busy} onClick={()=>void post({action:'reject',id:item.id})}>Відхилити</button>
         </div>}
       </article>)}

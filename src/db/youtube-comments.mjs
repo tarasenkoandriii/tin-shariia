@@ -142,14 +142,12 @@ export async function approveYouTubeComment(db,identity,id,input,verify=verifyYo
     if(!connection?.scopes?.includes(COMMENT_SCOPE))throw Error('YOUTUBE_COMMENT_SCOPE_REQUIRED');
     const {rows:[row]}=await tx.query(`SELECT c.*, (SELECT v.youtube_id FROM episodes e JOIN claims cl ON cl.id=e.claim_id JOIN videos v ON v.id=cl.video_id WHERE e.id=c.episode_id) AS source_video_id FROM youtube_short_comments c WHERE c.id=$1 FOR UPDATE OF c`,[uuid(id)]);
     if(!row||row.state!=='succeeded')throw Error('YOUTUBE_COMMENT_NOT_READY');
-    const link=new URL('/go/short/'+encodeURIComponent(row.tracking_token),origin()).toString();
+    const link='youtube.com/shorts/'+row.short_video_id;
     const text=commentText(input.text);
     if(input.targetVideoId!==row.parent_video_id||input.channelId!==connection.channel_id||input.link!==link)
       throw Error('YOUTUBE_COMMENT_APPROVAL_CHANGED');
     await verify({...row,...connection});
-    const staged=row.target_kind==='source';
-    if(staged&&!input.shortLink)throw Error('YOUTUBE_COMMENT_SHORT_LINK_REQUIRED');
-    const publicLink=input.shortLink?await verifyCommentShortLink(input.shortLink,link):link;
+    const publicLink=link;
     const finalText=text+'\n\n'+publicLink;
     if(finalText.length>2000)throw Error('YOUTUBE_COMMENT_TEXT_TOO_LONG');
     const {rows:[last]}=await tx.query(`SELECT COALESCE(max(COALESCE(published_at,scheduled_at)),now()) AS last_at
@@ -159,9 +157,9 @@ export async function approveYouTubeComment(db,identity,id,input,verify=verifyYo
       input_snapshot=jsonb_set(input_snapshot,'{publishNow}',to_jsonb($7::boolean)),approved_by=$5,approved_channel_id=$6,approved_at=now(),updated_at=now()
       WHERE id=$1 AND state='succeeded' RETURNING id,state,scheduled_at,final_text`,[row.id,finalText,last.last_at,settings.interval_hours,member.id,connection.channel_id,input.publishNow===true]);
     if(!scheduled)throw Error('YOUTUBE_COMMENT_NOT_READY');
-    if(staged) await tx.query(`INSERT INTO youtube_comment_steps(comment_id,phase,plain_text,linked_text)
-      VALUES($1,'waiting_plain',$2,$3)
-      ON CONFLICT(comment_id) DO UPDATE SET phase='waiting_plain',plain_text=$2,linked_text=$3,
+    await tx.query(`INSERT INTO youtube_comment_steps(comment_id,phase,plain_text,linked_text)
+      VALUES($1,'waiting_link',$2,$3)
+      ON CONFLICT(comment_id) DO UPDATE SET phase='waiting_link',plain_text=$2,linked_text=$3,
       lease=NULL,lease_until=NULL,plain_verified_at=NULL,linked_verified_at=NULL,checked_at=NULL,error_code=NULL`,
       [row.id,text,finalText]);
     await tx.query(`INSERT INTO youtube_short_comment_events(comment_id,actor_id,action,details) VALUES($1,$2,'approved',$3::text::jsonb)`,
@@ -175,7 +173,7 @@ export async function recoverYouTubeComment(db,identity,id){
     const member=await activeMember(tx,identity);
     if(!member?.roles.includes('editor')) throw Error('FORBIDDEN');
     const {rows:[row]}=await tx.query(`UPDATE youtube_short_comments SET state='succeeded',
-      draft_text=COALESCE(regexp_replace(final_text,E'\\n\\nhttps://[^[:space:]]+$',''),draft_text),
+      draft_text=COALESCE(regexp_replace(final_text,E'\\n\\n(https://[^[:space:]]+|youtube[.]com/shorts/[^[:space:]]+)$',''),draft_text),
       final_text=NULL,approved_by=NULL,approved_at=NULL,approved_channel_id=NULL,
       scheduled_at=NULL,completed_at=NULL,lease_until=NULL,error_code=NULL,updated_at=now(),
       input_snapshot=input_snapshot-'publishNow'-'verificationPending'
@@ -277,7 +275,7 @@ export async function claimScheduledYouTubeComment(db){
       WHERE state IN ('publishing','unknown') AND approved_at IS NOT NULL
         OR state='published' AND published_at>now()-($1::text||' hours')::interval LIMIT 1`,[settings.interval_hours]);
     if(recent)return null;
-    const {rows:[row]}=await tx.query(`SELECT c.id,c.final_text,(SELECT plain_text FROM youtube_comment_steps WHERE comment_id=c.id) AS plain_text,c.parent_video_id,c.short_video_id,c.tracking_token,c.target_kind,c.approved_channel_id,
+    const {rows:[row]}=await tx.query(`SELECT c.id,c.final_text,c.parent_video_id,c.short_video_id,c.tracking_token,c.target_kind,c.approved_channel_id,
       (SELECT v.youtube_id FROM episodes e JOIN claims cl ON cl.id=e.claim_id JOIN videos v ON v.id=cl.video_id WHERE e.id=c.episode_id) AS source_video_id, y.channel_title,y.channel_id,y.scopes,y.refresh_token_encrypted
       FROM youtube_short_comments c LEFT JOIN youtube_connections y ON y.disconnected_at IS NULL
       WHERE c.state='scheduled' AND c.scheduled_at<=now()

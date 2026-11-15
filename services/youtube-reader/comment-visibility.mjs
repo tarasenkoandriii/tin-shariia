@@ -26,7 +26,7 @@ export async function verifyCommentAfterReload(page,input){
         channel:renderer?.data?.authorEndpoint?.browseEndpoint?.browseId??null};
     });
     const normalize=value=>value.replace(/\s+/g,' ').trim();
-    const textMatches=normalize(found.text)===normalize(input.expectedText),authorMatches=!found.channel||found.channel===input.channelId;
+    const textMatches=normalize(found.text)===normalize(input.expectedText),authorMatches=found.channel===input.channelId;
     console.info('COMMENT_VERIFY_DIAGNOSTIC',{commentId:input.commentId,textMatches,authorMatches,textLength:found.text.length,expectedLength:input.expectedText.length});
     return textMatches&&authorMatches;
   }catch(error){
@@ -34,4 +34,11 @@ export async function verifyCommentAfterReload(page,input){
     await page.screenshot({path:'/tmp/comment-read-debug.png'}).catch(()=>{});
     return false;
   }
+}
+
+// A new non-persistent context has no publishing account cookies or local storage.
+export async function verifyCommentInIncognito(browser,input){
+  const context=await browser.newContext({storageState:{cookies:[],origins:[]},viewport:{width:1280,height:800}});
+  try{return await verifyCommentAfterReload(await context.newPage(),input);}
+  finally{await context.close();}
 }

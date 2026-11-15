@@ -1,4 +1,4 @@
-import {verifyCommentAfterReload} from './comment-visibility.mjs';
+import {verifyCommentInIncognito} from './comment-visibility.mjs';
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import { chmod, readFile } from 'node:fs/promises';
@@ -75,7 +75,11 @@ http.createServer(async (req, res) => {
       if (body.length > 65536) return reply(413, { error: 'TOO_LARGE' });
     }
     const input = JSON.parse(body);
-    if(req.url==='/verify-comment') return reply(200,{visible:await verifyCommentAfterReload(page,input)});
+    if(req.url==='/verify-comment'){
+      const browser=await chromium.launch({headless:true,chromiumSandbox:true});
+      try{return reply(200,{visible:await verifyCommentInIncognito(browser,input),method:'incognito-reload'});}
+      finally{await browser.close();}
+    }
     if (req.url === '/session') {
       if (!Array.isArray(input.cookies) || input.cookies.length > 100) return reply(400, { error: 'INVALID_SESSION' });
       const cookies = input.cookies.filter(c => ['youtube.com', '.youtube.com', 'www.youtube.com', 'studio.youtube.com'].includes(c.domain))

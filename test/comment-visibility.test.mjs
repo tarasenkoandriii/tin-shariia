@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {verifyCommentAfterReload} from '../services/youtube-reader/comment-visibility.mjs';
+import {verifyCommentAfterReload,verifyCommentInIncognito} from '../services/youtube-reader/comment-visibility.mjs';
 const input={videoId:'SVIDu_m8UT4',commentId:'UgwGdCbOnJpfpDD-NnJ4AaABAg',channelId:'ours',expectedText:'Перевірка\n\nhttps://is.gd/test'};
 function mock(text=input.expectedText,channel='ours'){
  const events=[];
@@ -14,4 +14,13 @@ test('rejects wrong text, wrong author, malformed input and unavailable page',as
  assert.equal(await verifyCommentAfterReload(mock(input.expectedText,'other').page,input),false);
  assert.equal(await verifyCommentAfterReload(mock().page,{...input,videoId:'bad'}),false);
  const {page,events}=mock();page.goto=async()=>{throw Error('timeout');};assert.equal(await verifyCommentAfterReload(page,input),false);assert.ok(events.includes('screenshot'));
+});
+
+test('uses fresh incognito context and closes it even on failed verification',async()=>{
+ const {page,events}=mock();
+ const browser={async newContext(options){assert.deepEqual(options.storageState,{cookies:[],origins:[]});events.push('new-context');return {async newPage(){return page;},async close(){events.push('closed');}};}};
+ assert.equal(await verifyCommentInIncognito(browser,input),true);
+ assert.equal(events[0],'new-context');assert.equal(events.at(-1),'closed');
+ page.goto=async()=>{throw Error('offline');};
+ assert.equal(await verifyCommentInIncognito(browser,input),false);assert.equal(events.at(-1),'closed');
 });

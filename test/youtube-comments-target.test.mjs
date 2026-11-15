@@ -8,7 +8,7 @@ import {SHARIY_CHANNEL_ID} from '../src/youtube/shariy-channel.mjs';
 
 const scope='https://www.googleapis.com/auth/youtube.force-ssl';
 const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const base={id,short_video_id:'short-id',channel_id:'ours',approved_channel_id:'ours',scopes:[scope],final_text:'Схвалений текст'};
+const base={id,short_video_id:'short-id',channel_id:'ours',approved_channel_id:'ours',scopes:[scope],final_text:'Схвалений текст\n\nyoutube.com/shorts/short-id'};
 const metadata=(row,{channel,privacy='public'}={})=>async()=>Response.json({items:[
   {id:row.parent_video_id,snippet:{channelId:channel??(row.target_kind==='source'?SHARIY_CHANNEL_ID:'ours')},status:{privacyStatus:'public'}},
   {id:row.short_video_id,snippet:{channelId:'ours'},status:{privacyStatus:privacy}},
@@ -33,7 +33,7 @@ function scheduledDb(row){
 
 for(const [target_kind,parent_video_id] of [['source','original-id'],['main','main-id']]){
   test(`commentThreads.insert targets ${target_kind} and accepts a single thread resource`,async()=>{
-    const row={...base,target_kind,parent_video_id,...(target_kind==='source'?{plain_text:'Текст без URL',final_text:'Текст без URL\n\nhttps://www.youtube.com/shorts/short-id'}:{})};
+    const row={...base,target_kind,parent_video_id,...(target_kind==='source'?{plain_text:'Текст без URL',final_text:'Текст без URL\n\nyoutube.com/shorts/short-id'}:{})};
     const db=scheduledDb(row);
     let requests=0;
     const deps={verify,accessToken:async()=>'test',fetchImpl:async(url,options)=>{
@@ -42,7 +42,7 @@ for(const [target_kind,parent_video_id] of [['source','original-id'],['main','ma
       const {snippet}=JSON.parse(options.body);
       assert.equal(snippet.videoId,parent_video_id);
       assert.equal(snippet.channelId,target_kind==='source'?SHARIY_CHANNEL_ID:'ours');
-      assert.equal(snippet.topLevelComment.snippet.textOriginal,row.plain_text??row.final_text);
+      assert.equal(snippet.topLevelComment.snippet.textOriginal,row.final_text);
       return Response.json({id:'thread',snippet:{topLevelComment:{id:'comment',snippet:{publishedAt:'2026-11-13T18:00:00Z'}}}});
     }};
     const results=await Promise.all([publishOne(db,deps),publishOne(db,deps)]);
@@ -178,16 +178,12 @@ test('Studio Short becomes a candidate and waits for official target verificatio
       assert.equal((await db.query('SELECT state FROM youtube_short_comments WHERE id=$1',[draft.id])).rows[0].state,'succeeded','shortening never publishes');
     }finally{globalThis.fetch=fetchBeforeShorten;}
     const approval={text:input.text,targetVideoId:'SVIDu_m8UT4',channelId:'ours',
-      link:'https://example.test/go/short/'+draft.tracking_token};
-    await assert.rejects(approveYouTubeComment(db,'reviewer',draft.id,approval,verify),/SHORT_LINK_REQUIRED/);
-    const oldFetch=globalThis.fetch;
-    try {
-      globalThis.fetch=async()=>new Response(null,{status:302,headers:{location:approval.link}});
-      await approveYouTubeComment(db,'reviewer',draft.id,{...approval,shortLink:'https://share.google/test123'},verify);
-    } finally { globalThis.fetch=oldFetch; }
+      link:'youtube.com/shorts/QdaWfN4b6Bg'};
+    await approveYouTubeComment(db,'reviewer',draft.id,approval,verify);
     const {rows:[steps]}=await db.query('SELECT * FROM youtube_comment_steps WHERE comment_id=$1',[draft.id]);
     assert.equal(steps.plain_text,input.text);
-    assert.equal(steps.linked_text,input.text+'\n\nhttps://share.google/test123');
+    assert.equal(steps.phase,'waiting_link');
+    assert.equal(steps.linked_text,input.text+'\n\nyoutube.com/shorts/QdaWfN4b6Bg');
     assert.equal((await db.query('SELECT state FROM youtube_short_comments WHERE id=$1',[draft.id])).rows[0].state,'scheduled');
     assert.equal(await recordYouTubeShortCommentClick(db,draft.tracking_token),null,'scheduled links stay inactive until published');
     await db.query("UPDATE youtube_short_comments SET state='publishing' WHERE id=$1",[draft.id]);
@@ -203,24 +199,16 @@ test('Studio Short becomes a candidate and waits for official target verificatio
     await db.query("UPDATE youtube_short_comments SET state='unknown',error_code='YOUTUBE_TOKEN_REFRESH_REVOKED' WHERE id=$1",[draft.id]);
     await assert.rejects(recoverYouTubeComment(db,'reviewer',draft.id),/NOT_READY/);
 
-    const {claimCommentVisibility,finishCommentVisibility,claimCommentLinkUpdate,finishCommentLinkUpdate}
+    const {claimCommentVisibility,finishCommentVisibility,claimCommentLinkUpdate}
       =await import('../src/db/youtube-comment-steps.mjs');
     await db.query("UPDATE youtube_short_comments SET state='published',youtube_comment_id='UgTestComment123' WHERE id=$1",[draft.id]);
     const check=await claimCommentVisibility(db);
-    assert.equal(check.expectedText,input.text);
+    assert.equal(check.expectedText,steps.linked_text);
     assert.equal(await claimCommentVisibility(db),null);
     assert.equal(await claimCommentLinkUpdate(db),null);
     assert.equal(await finishCommentVisibility(db,{...check,visible:true}),true);
     assert.equal(await finishCommentVisibility(db,{...check,visible:true}),false,'stale confirmation cannot advance twice');
-    const update=await claimCommentLinkUpdate(db);
-    assert.equal(update.youtube_comment_id,'UgTestComment123');
-    assert.equal(update.linked_text,steps.linked_text);
-    assert.equal(await claimCommentLinkUpdate(db),null,'one update lease');
-    await finishCommentLinkUpdate(db,update,'YOUTUBE_COMMENT_EDIT_UNCONFIRMED');
-    assert.equal(await claimCommentLinkUpdate(db),null,'unknown PUT outcome is never automatically retried');
-    const linkedCheck=await claimCommentVisibility(db);
-    assert.equal(linkedCheck.expectedText,steps.linked_text);
-    assert.equal(await finishCommentVisibility(db,{...linkedCheck,visible:true}),true);
+    assert.equal(await claimCommentLinkUpdate(db),null,'direct-link publication never needs a link edit');
     assert.equal((await db.query('SELECT phase FROM youtube_comment_steps WHERE comment_id=$1',[draft.id])).rows[0].phase,'verified');
     assert.equal(await claimCommentVisibility(db),null);
     await db.query("UPDATE youtube_short_comments SET approved_channel_id='ours' WHERE id=$1",[draft.id]);
@@ -267,7 +255,7 @@ test('OAuth diagnostics expose only the allowlisted refresh failure code',async(
 
 test('link edit updates the existing comment and sends uncertain results to reload verification',async()=>{
   const {appendVisibleCommentLink}=await import('../src/youtube/comments.mjs');
-  const row={...base,lease:id,youtube_comment_id:'UgExisting123',linked_text:'Текст\n\nhttps://www.youtube.com/shorts/short-id'};
+  const row={...base,lease:id,youtube_comment_id:'UgExisting123',linked_text:'Текст\n\nyoutube.com/shorts/short-id'};
   let claimed=false,finished;
   const db={query:async(sql,args)=>{
     if(sql.includes('WITH candidate')){
@@ -307,4 +295,12 @@ test('public visibility checks preserve publication and record absence separatel
     assert.deepEqual(writes.at(-1).slice(0,3),[id,'UgTest',code]);
     assert.ok(Number.isFinite(Date.parse(writes.at(-1)[3])));
   }
+});
+
+test('old shortened-link approval is not silently published under the direct-link policy',async()=>{
+ const db=scheduledDb({...base,target_kind:'source',parent_video_id:'original-id',final_text:'Текст\n\nhttps://is.gd/old'});
+ let sent=false;
+ const result=await publishOne(db,{verify,accessToken:async()=>'test',fetchImpl:async()=>{sent=true;throw Error('must not send');}});
+ assert.equal(sent,false);assert.equal(result.failed,1);
+ assert.ok(db.writes.some(args=>args.includes('YOUTUBE_COMMENT_APPROVAL_CHANGED')));
 });
