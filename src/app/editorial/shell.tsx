@@ -19,6 +19,7 @@ export function EditorialShell({ roles, account, children }: { roles: string[]; 
   }, [open]);
 
   return <div className="ed-shell" data-menu={open ? 'open' : 'closed'}>
+    <a className="ed-skip" href="#ed-main">Перейти до змісту</a>
     <aside className="ed-sidebar" id="ed-menu" aria-label="Меню редакції">
       <Link className="ed-brand" href="/editorial" onClick={() => setOpen(false)}>
         <span className="ed-brand-mark" aria-hidden="true">ТШ</span>
@@ -48,7 +49,7 @@ export function EditorialShell({ roles, account, children }: { roles: string[]; 
         <p className="ed-topbar-title">{current?.label ?? 'Редакція'} <span>· Тінь Шарія</span></p>
         {account}
       </header>
-      <div className="ed-content">{children}</div>
+      <div className="ed-content" id="ed-main" tabIndex={-1}>{children}</div>
     </div>
   </div>;
 }

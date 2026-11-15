@@ -209,7 +209,8 @@ function attentionSources(roles){
   if(roles.some(role=>COMMENT_ROLES.includes(role)))sources.push({name:'comments',sql:`SELECT c.id,c.state,c.error_code,c.published_at,
       c.updated_at AS time,c.input_snapshot->'publicVisibility' AS public_visibility,
       (SELECT row_to_json(s) FROM (SELECT phase,linked_verified_at,checked_at FROM youtube_comment_steps WHERE comment_id=c.id) s) AS publication_steps,
-      left(COALESCE(NULLIF(btrim(c.input_snapshot->>'parentTitle'),''),'Відео '||c.parent_video_id),200) AS title
+      left(COALESCE(NULLIF(btrim((SELECT ev.content->>'title' FROM episodes e JOIN episode_versions ev ON ev.episode_id=e.id AND ev.version=e.version
+        WHERE e.id=c.episode_id)),''),NULLIF(btrim(c.input_snapshot->>'parentTitle'),''),'Відео '||c.parent_video_id),200) AS title
     FROM youtube_short_comments c
     WHERE c.state IN ('succeeded','failed','unknown')
       OR (c.state='published' AND (c.input_snapshot->'publicVisibility'->>'code'='YOUTUBE_COMMENT_NOT_VISIBLE'

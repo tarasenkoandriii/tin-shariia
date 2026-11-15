@@ -1,6 +1,7 @@
 /* Editorial design system: dark surfaces, turquoise accent. Every editorial page uses these tokens and
    building blocks (.ed-page-head, .ed-card, .ed-table, .ed-badge, .ed-filters, .ed-empty). */
 .ed-shell {
+  position: relative;
   --ed-bg: #0d1215;
   --ed-surface: #131b20;
   --ed-surface-2: #172229;
@@ -27,7 +28,8 @@
   display: grid;
   grid-template-columns: 15.5rem minmax(0, 1fr);
   min-height: 100vh;
-  background: var(--ed-bg);
+  /* The sidebar column keeps its colour down the whole page, also in full-page captures. */
+  background: linear-gradient(to right, #0f171b 15.5rem, var(--ed-line) 15.5rem, var(--ed-line) calc(15.5rem + 1px), var(--ed-bg) calc(15.5rem + 1px));
   color: var(--ed-text);
 }
 .ed-shell a { color: var(--ed-accent); text-underline-offset: .18em; }
@@ -79,8 +81,11 @@
 .ed-topbar-title { flex: 1; min-width: 0; margin: 0; font-size: .98rem; font-weight: 600; color: var(--ed-text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ed-topbar-title span { color: var(--ed-subtle); font-weight: 500; }
-.ed-menu-button { display: none; }
-.ed-content { flex: 1; padding: clamp(1rem, 3vw, 2.25rem) clamp(1rem, 3vw, 2.25rem) 4rem; }
+.ed-shell .ed-menu-button { display: none; }
+.ed-shell a.ed-skip { position: absolute; left: .75rem; top: -3rem; z-index: 30; padding: .5rem .9rem; border-radius: var(--ed-radius-sm);
+  background: var(--ed-accent); color: var(--ed-accent-ink); font-weight: 700; text-decoration: none; }
+.ed-shell a.ed-skip:focus { top: .6rem; }
+.ed-content { position: relative; flex: 1; padding: clamp(1rem, 3vw, 2.25rem) clamp(1rem, 3vw, 2.25rem) 4rem; }
 .ed-content > main { max-width: 84rem; margin: 0 auto; padding: 0; }
 
 /* Page header */
@@ -110,7 +115,10 @@
 .ed-shell .ed-primary:hover:not(:disabled), .ed-shell a.ed-primary:hover { background: #82e6d2; border-color: #82e6d2; }
 .ed-shell .ed-quiet { background: transparent; border-color: transparent; color: var(--ed-accent); padding-inline: .5rem; }
 
-/* Form controls */
+/* Form controls (forms from older panels use a one-column grid; never wider than their container) */
+.ed-shell form { grid-template-columns: minmax(0, 1fr); }
+.ed-shell form label { min-width: 0; }
+.ed-shell input[type="file"] { width: 100%; min-width: 0; }
 .ed-shell input:not([type="checkbox"]):not([type="radio"]), .ed-shell select, .ed-shell textarea {
   min-height: 2.5rem; padding: .5rem .7rem; border: 1px solid var(--ed-line-strong); border-radius: var(--ed-radius-sm);
   background: #0f171b; color: var(--ed-text); font: inherit; max-width: 100%; box-sizing: border-box;
@@ -146,7 +154,7 @@
 .ed-tone-danger { color: var(--ed-danger); background: var(--ed-danger-soft); }
 
 /* Tables */
-.ed-table-wrap { overflow-x: auto; border: 1px solid var(--ed-line); border-radius: var(--ed-radius); background: var(--ed-surface); }
+.ed-table-wrap { position: relative; overflow-x: auto; border: 1px solid var(--ed-line); border-radius: var(--ed-radius); background: var(--ed-surface); }
 .ed-table { width: 100%; border-collapse: collapse; font-size: .93rem; }
 .ed-table th { padding: .7rem .9rem; text-align: left; font-size: .76rem; font-weight: 650; letter-spacing: .04em;
   text-transform: uppercase; color: var(--ed-subtle); border-bottom: 1px solid var(--ed-line); white-space: nowrap; }
@@ -179,15 +187,16 @@
 
 /* Mobile: the sidebar becomes a disclosure menu under the top bar. */
 @media (max-width: 900px) {
-  .ed-shell { grid-template-columns: minmax(0, 1fr); }
+  .ed-shell { grid-template-columns: minmax(0, 1fr); background: var(--ed-bg); }
   .ed-sidebar { position: fixed; inset: 3.6rem 0 0 0; z-index: 20; height: auto; border-right: 0; display: none; background: #0f171b; }
   .ed-shell[data-menu="open"] .ed-sidebar { display: flex; }
   .ed-sidebar .ed-brand { display: none; }
-  .ed-menu-button { display: inline-flex; }
+  .ed-shell .ed-menu-button { display: inline-flex; }
   .ed-content { padding-inline: 1rem; }
   .ed-table-wrap { border-radius: 10px; }
 }
 @media (max-width: 560px) {
+  .ed-topbar-title span { display: none; }
   .ed-page-head { align-items: stretch; }
   .ed-page-head .ed-actions, .ed-page-head .ed-actions > * { width: 100%; }
   .ed-thumb { width: 5.5rem; }

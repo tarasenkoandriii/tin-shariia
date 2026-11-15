@@ -35,6 +35,10 @@ type Overview = {
   series: { timeZone: string; days: Day[] } | null;
 };
 
+const stageLabels: Record<string, string> = {
+  factcheck: 'Фактчек', transcripts: 'Субтитри', analysis: 'Аналіз Gemini', script: 'Сценарій', grok: 'Перевірка Grok',
+  montage: 'Монтаж', shorts: 'Shorts', publication: 'Публікація', published: 'Опубліковано', comments: 'Коментарі',
+};
 const number = (value: number | null | undefined) => value === null || value === undefined ? null : value;
 
 function Stat({ label, value, period, href, hint }: { label: string; value: number | null; period?: string; href: string | null; hint: string }) {
@@ -107,7 +111,7 @@ export default async function Overview({ searchParams }: { searchParams: Promise
           : <ol className="ov-queue">{attention.items.map(item => <li key={item.key} className={'ov-queue-item ov-' + item.tone}>
             <div className="ov-queue-main">
               <Link href={item.href} className="ov-queue-title">{item.title}</Link>
-              <p><Badge tone={item.tone}>{item.stage}</Badge> <span>{item.reason}</span></p>
+              <p><Badge tone={item.tone}>{stageLabels[item.stage] ?? item.stage}</Badge> <span>{item.reason}</span></p>
             </div>
             <div className="ov-queue-side"><KyivTime value={item.time} /><Link className="ed-button" href={item.href}>Відкрити</Link></div>
           </li>)}</ol>}
