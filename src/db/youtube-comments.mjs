@@ -363,8 +363,10 @@ export async function createYouTubeCommentDraft(db,identity,{uploadId,publicatio
     // Studio publications are checked by the server-side dispatcher, where provider keys live.
     // They remain unapprovable until that read-only YouTube API check completes.
     if(!publicationId)await verify({...row,source_video_id:row.parent_video_id,target_kind:targetKind});
-    const {rows:[existing]}=await tx.query('SELECT id FROM youtube_short_comments WHERE parent_video_id=$1 AND short_video_id=$2',
-      [row.parent_video_id,row.short_video_id]);
+    const {rows:[existing]}=await tx.query(`SELECT id FROM youtube_short_comments
+      WHERE parent_video_id=$1 AND short_video_id=$2 AND target_kind=$3
+        AND ($3='main' OR state NOT IN ('published','rejected','failed'))
+      ORDER BY created_at DESC LIMIT 1`,[row.parent_video_id,row.short_video_id,targetKind]);
     if(existing) return existing;
     if(generate){
       const {rows:[budget]}=await tx.query(`SELECT

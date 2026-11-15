@@ -237,6 +237,13 @@ test('Studio Short becomes a candidate and waits for official target verificatio
       assert.equal(stored.final_text,input.text+'\n\nhttps://is.gd/new123');
       assert.equal((await db.query("SELECT count(*)::int AS count FROM youtube_short_comment_events WHERE details->>'operation'='replace-published-link'")).rows[0].count,1);
     }finally{globalThis.fetch=oldFetchForRepair;}
+    const nextInput={...input,text:'У документі йдеться про початок судового розгляду.'};
+    const next=await createYouTubeCommentDraft(db,'reviewer',nextInput);
+    assert.notEqual(next.id,draft.id);
+    assert.equal((await createYouTubeCommentDraft(db,'reviewer',nextInput)).id,next.id);
+    const {rows:[nextRow]}=await db.query('SELECT parent_video_id,short_video_id FROM youtube_short_comments WHERE id=$1',[next.id]);
+    assert.deepEqual(nextRow,{parent_video_id:'SVIDu_m8UT4',short_video_id:'QdaWfN4b6Bg'});
+
   }finally{
     if(previous===undefined)delete process.env.APP_ORIGIN;else process.env.APP_ORIGIN=previous;
     await db.close();
