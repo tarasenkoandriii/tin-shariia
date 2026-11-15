@@ -1,5 +1,5 @@
 import {decryptYouTubeSecret,refreshYouTubeAccessToken,youtubeOAuthConfig} from '../youtube/oauth.mjs';
-import {registerVideo} from '../db/editorial-import.mjs';
+import {importTranscript,registerVideo} from '../db/editorial-import.mjs';
 import {captionsImportStatus} from '../db/captions-import.mjs';
 
 const pause = code => ({wait:true,code});
@@ -24,6 +24,13 @@ export function projectSourceHandlers(db,identity,{fetchImpl=fetch}={}) {
    if(!playlist)throw before('CYCLE_SOURCE_UNAVAILABLE');
    const list=await api('playlistItems?part=snippet,contentDetails&maxResults=20&playlistId='+playlist,token);
    if(list.status!==200)throw before('CYCLE_SOURCE_UNAVAILABLE');
+   if(policy.seed?.videoId) {
+    const checked=await api('videos?part=snippet&id='+policy.seed.videoId,token);
+    const item=checked.body.items?.[0];
+    if(item?.snippet?.channelId!==policy.sourceChannelId)throw before('CYCLE_SOURCE_INVALID');
+    const video=await registerVideo(db,'https://www.youtube.com/watch?v='+item.id);
+    return {videoId:item.id,videoRecordId:video.id,channelId:item.snippet.channelId,title:item.snippet.title};
+   }
    const checks=[];
    for(const item of list.body.items??[]) {
     const videoId=item.contentDetails.videoId;
@@ -43,7 +50,8 @@ export function projectSourceHandlers(db,identity,{fetchImpl=fetch}={}) {
    }
    return {skip:true,code:'NO_NEW_SOURCE',checks};
   },
-  async captions({artifacts}) {
+  async captions({artifacts,policy}) {
+   if(policy.seed?.srt) await importTranscript(db,{videoId:artifacts.discover.videoRecordId,bytes:Buffer.from(policy.seed.srt),format:'srt'});
    const source=artifacts.discover;
    const {rows:[transcript]}=await db.query('SELECT id FROM transcripts WHERE video_id=$1 ORDER BY version DESC LIMIT 1',[source.videoRecordId]);
    if(transcript) {

@@ -1,3 +1,4 @@
+import {dispatchEditorialCycles} from '../../../../workflows/editorial-cycle-dispatch';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { dispatchMontages } from '../../../../workflows/montage-dispatch';
 import { dispatchShortRenders } from '../../../../workflows/shorts-dispatch';
@@ -16,12 +17,12 @@ export async function GET(request: Request) {
     return Response.json({error:'UNAUTHORIZED'},{status:401,headers});
   }
   const db=await database();
-  const [sources,montages,shorts,publicationStats,grokReviews,youtubeComments]=await Promise.allSettled([
-    dispatchSources(),dispatchMontages(),dispatchShortRenders(),syncYouTubePublicationStats(db),dispatchEpisodeGrokReviews(db),dispatchYouTubeComments(db),
+  const [sources,montages,shorts,publicationStats,grokReviews,youtubeComments,cycles]=await Promise.allSettled([
+    dispatchSources(),dispatchMontages(),dispatchShortRenders(),syncYouTubePublicationStats(db),dispatchEpisodeGrokReviews(db),dispatchYouTubeComments(db),dispatchEditorialCycles(),
   ]);
-  const failed=[sources,montages,shorts,publicationStats,grokReviews,youtubeComments].some(item=>item.status==='rejected');
+  const failed=[sources,montages,shorts,publicationStats,grokReviews,youtubeComments,cycles].some(item=>item.status==='rejected');
   console.info('CRON_DISPATCH_RESULT',JSON.stringify({
-    failed,
+    failed,cycles:cycles.status==='fulfilled'?cycles.value:{failed:true},
     sources:sources.status==='fulfilled'?sources.value:{failed:true},
     montages:montages.status==='fulfilled'?montages.value:{failed:true},
     shorts:shorts.status==='fulfilled'?shorts.value:{failed:true},

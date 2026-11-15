@@ -21,3 +21,19 @@ CREATE INDEX editorial_cycles_queue ON editorial_cycles(state,retry_at,updated_a
 CREATE UNIQUE INDEX editorial_cycles_active_source ON editorial_cycles
  ((artifacts->'discover'->>'videoId'))
  WHERE state IN ('queued','running','waiting') AND artifacts->'discover'->>'videoId' IS NOT NULL;
+CREATE TABLE editorial_cycle_media_tasks (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ cycle_id uuid NOT NULL REFERENCES editorial_cycles(id),
+ kind text NOT NULL CHECK(kind IN ('render','youtube_audio')),
+ state text NOT NULL DEFAULT 'preparing' CHECK(state IN ('preparing','queued','running','done','failed','unknown')),
+ input jsonb NOT NULL DEFAULT '{}',
+ output jsonb,
+ lease uuid,
+ lease_until timestamptz,
+ error_code text,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ updated_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(cycle_id,kind)
+);
+ALTER TABLE editorial_cycles ADD COLUMN workflow_run_id text;
+ALTER TABLE editorial_cycles ADD COLUMN dispatch_until timestamptz;
