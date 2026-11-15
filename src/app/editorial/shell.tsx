@@ -11,7 +11,6 @@ export function EditorialShell({ roles, account, children }: { roles: string[]; 
   const [open, setOpen] = useState(false);
   const items = visibleSections(roles);
   const current = sectionForPath(pathname);
-  useEffect(() => { setOpen(false); }, [pathname]);
   useEffect(() => {
     if (!open) return;
     const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
@@ -21,7 +20,7 @@ export function EditorialShell({ roles, account, children }: { roles: string[]; 
 
   return <div className="ed-shell" data-menu={open ? 'open' : 'closed'}>
     <aside className="ed-sidebar" id="ed-menu" aria-label="Меню редакції">
-      <Link className="ed-brand" href="/editorial">
+      <Link className="ed-brand" href="/editorial" onClick={() => setOpen(false)}>
         <span className="ed-brand-mark" aria-hidden="true">ТШ</span>
         <span><strong>Тінь Шарія</strong><small>Редакція</small></span>
       </Link>
@@ -32,7 +31,7 @@ export function EditorialShell({ roles, account, children }: { roles: string[]; 
           return <section className="ed-nav-group" key={group} aria-labelledby={'ed-group-' + group}>
             <h2 id={'ed-group-' + group}>{group}</h2>
             <ul>{links.map(item => <li key={item.key}>
-              <Link className="ed-nav-link" href={item.href} aria-current={current?.key === item.key ? 'page' : undefined}>
+              <Link className="ed-nav-link" href={item.href} onClick={() => setOpen(false)} aria-current={current?.key === item.key ? 'page' : undefined}>
                 {item.label}
               </Link>
             </li>)}</ul>
