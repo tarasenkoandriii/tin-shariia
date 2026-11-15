@@ -95,7 +95,7 @@ test('migrated database supports the dashboard and both queues',async()=>{
     await db.query("INSERT INTO member_roles(member_id,role) VALUES($1,'editor')",[member.id]);
     const dashboard=await loadYouTubeCommentDashboard(db,'editor');
     assert.equal(dashboard.settings.enabled,false);
-    assert.equal(dashboard.settings.interval_hours,3);
+    assert.equal(dashboard.settings.interval_hours,1);
     await db.query('UPDATE youtube_comment_settings SET enabled=true');
     assert.deepEqual(await queueYouTubeCommentDrafts(db),[]);
     assert.equal(await claimScheduledYouTubeComment(db),null);

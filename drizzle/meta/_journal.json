@@ -225,6 +225,13 @@
       "when": 1794720000002,
       "tag": "0031_allow_multiple_source_comments",
       "breakpoints": false
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794720000003,
+      "tag": "0032_hourly_comment_interval",
+      "breakpoints": false
     }
   ]
 }

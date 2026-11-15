@@ -57,7 +57,7 @@ export async function loadYouTubeCommentDashboard(db,identity){
     FROM youtube_short_comments c LEFT JOIN youtube_short_comment_clicks x ON x.comment_id=c.id
     WHERE c.state='published' AND c.published_at>=now()-interval '7 days'
     GROUP BY c.id ORDER BY c.published_at`);
-  return {settings:settings??{enabled:false,interval_hours:3},
+  return {settings:settings??{enabled:false,interval_hours:1},
     connection:connection?{channelTitle:connection.channel_title,channelId:connection.channel_id,commentScope:connection.scopes.includes(COMMENT_SCOPE)}:null,
     comments:comments.map(row=>({...row,click_count:Number(row.click_count)})),
     chart:chart.map(row=>({hour:row.hour,clicks:Number(row.clicks)})),
@@ -75,7 +75,7 @@ export async function updateYouTubeCommentSettings(db,identity,{enabled,interval
   return db.transaction(async tx=>{
     const member=await activeMember(tx,identity);
     if(!member?.roles.includes('admin'))throw Error('FORBIDDEN');
-    if(typeof enabled!=='boolean'||!Number.isSafeInteger(intervalHours)||intervalHours<3||intervalHours>168)throw Error('INVALID_INPUT');
+    if(typeof enabled!=='boolean'||!Number.isSafeInteger(intervalHours)||intervalHours<1||intervalHours>168)throw Error('INVALID_INPUT');
     if(enabled&&confirmed!==true)throw Error('YOUTUBE_COMMENT_CONSENT_REQUIRED');
     if(enabled){const {rows:[connection]}=await tx.query('SELECT scopes FROM youtube_connections WHERE disconnected_at IS NULL LIMIT 1');
       if(!connection?.scopes?.includes(COMMENT_SCOPE))throw Error('YOUTUBE_COMMENT_SCOPE_REQUIRED');}

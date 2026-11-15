@@ -72,7 +72,7 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
       {needsScope&&<Link className="button-link" href="/api/youtube/oauth/start?comments=1">Надати дозвіл на коментарі YouTube</Link>}
       {canManage&&<>
         <label className="comment-setting-field">Інтервал, годин
-          <input type="number" min={3} max={168} value={hours} onChange={event=>setHours(Number(event.target.value))} />
+          <input type="number" min={1} max={168} value={hours} onChange={event=>setHours(Number(event.target.value))} />
         </label>
         <label className="comment-setting-field"><input type="checkbox" checked={enabled} onChange={event=>setEnabled(event.target.checked)} /> Увімкнути чергу схвалених коментарів</label>
         {enabled&&<label className="comment-setting-consent"><input type="checkbox" checked={consented} onChange={event=>setConsented(event.target.checked)} />
@@ -82,7 +82,7 @@ export function YouTubeCommentDashboard({initial,canManage,canApprove}:{initial:
         </button>
       </>}
       {message&&<p role="status">{message}</p>}
-      <p className="muted">Інтервал за замовчуванням — 3 години; мінімум також 3 години, щоб не перетворювати коментарі на частий повторюваний потік. Він розділяє публікації глобально. Нова настройка діє для майбутніх схвалень; уже запланований час не пересувається.</p>
+      <p className="muted">Інтервал за замовчуванням і мінімальний інтервал — 1 година. Він розділяє публікації глобально. Нова настройка діє для майбутніх схвалень; уже запланований час не пересувається.</p>
     </section>
     <section className="workflow-card youtube-click-chart">
       <div className="youtube-chart-heading"><div><h2>Переходи з коментарів</h2><p>Останні 7 днів · некласифіковані запити (позначені тести виключено)</p></div>
