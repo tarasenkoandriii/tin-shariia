@@ -41,9 +41,14 @@ export async function assertContinuousAudio(path) {
 export async function repairCapturedQuote(input,output) {
   const timeline=await inspectAudioTimeline(input);
   if(timeline.emptySeconds<=0.05&&!timeline.overlaps.length)return {path:input,repaired:false,...timeline};
-  const terms=[...timeline.gaps.map(gap=>({...gap,sign:1})),...timeline.overlaps.map(gap=>({...gap,sign:-1}))].map(gap=>
-    gap.sign+'*min(max(PTS*TB-'+gap.start.toFixed(9)+',0),'+gap.duration.toFixed(9)+')').join('+');
-  const filters="[0:v]setpts='(PTS*TB-("+terms+"))/TB',fps=30,tpad=stop_mode=clone:stop_duration=0.1[v];"
+  let terms=[...timeline.gaps.map(gap=>({...gap,sign:1})),...timeline.overlaps.map(gap=>({...gap,sign:-1}))].map(gap=>
+    gap.sign+'*min(max(PTS*TB-'+gap.start.toFixed(9)+',0),'+gap.duration.toFixed(9)+')');
+  while(terms.length>1){
+    const pairs=[];
+    for(let i=0;i<terms.length;i+=2)pairs.push(i+1<terms.length?'('+terms[i]+'+'+terms[i+1]+')':terms[i]);
+    terms=pairs;
+  }
+  const filters="[0:v]setpts='(PTS*TB-("+terms[0]+"))/TB',fps=30,tpad=stop_mode=clone:stop_duration=0.1[v];"
     +"[0:a]asetpts=N/SR/TB,aresample=48000[a]";
   await run('ffmpeg',['-v','error','-nostdin','-n','-i',input,'-filter_complex',filters,
     '-map','[v]','-map','[a]','-t',String(timeline.decodedSeconds),'-c:v','libx264','-preset','fast','-crf','18',

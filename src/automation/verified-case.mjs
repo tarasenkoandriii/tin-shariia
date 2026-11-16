@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {changeEditorial} from '../db/editorial-workflow.mjs';
 const plain=value=>String(value).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/g,' ').replace(/&[lr]aquo;/g,'"').replace(/&[lr]dquo;/g,'"').replace(/\s+/g,' ').trim();
-const sourceHosts=new Set(['www.president.gov.ua','president.gov.ua','www.rada.gov.ua','zakon.rada.gov.ua','fisu.gov.ua','szru.gov.ua','www.radiosvoboda.org','www.pravda.com.ua','censor.net','interfax.com.ua','gov.uz']);
+const sourceHosts=new Set(['hacc-decided.ti-ukraine.org','suspilne.media','mfa.gov.ua','news.telegraf.com.ua','www.president.gov.ua','president.gov.ua','www.rada.gov.ua','zakon.rada.gov.ua','fisu.gov.ua','szru.gov.ua','www.radiosvoboda.org','www.pravda.com.ua','censor.net','interfax.com.ua','gov.uz']);
 export async function verifyCaseEvidence(seed,{fetchImpl=fetch}={}) {
  if(!Array.isArray(seed.evidence)||seed.evidence.length<2||seed.evidence.length>6)throw Error('CYCLE_EVIDENCE_REQUIRED');
  const evidence=[];
@@ -14,7 +14,7 @@ export async function verifyCaseEvidence(seed,{fetchImpl=fetch}={}) {
   for await(const chunk of r.body){length+=chunk.length;if(length>2*1024*1024)throw Error('CYCLE_SOURCE_INVALID');chunks.push(chunk);}
   const bytes=Buffer.concat(chunks),text=plain(bytes.toString());
   if(typeof item.excerpt!=='string'||item.excerpt.length<15||!text.includes(plain(item.excerpt)))throw Error('CYCLE_EVIDENCE_QUOTE_MISMATCH');
-  evidence.push({...item,primary:/\.gov\.ua$|^gov\.uz$/.test(url.hostname),documentHash:createHash('sha256').update(bytes).digest('hex'),checkedAt:new Date().toISOString()});
+  evidence.push({...item,primary:/\.gov\.ua$|^gov\.uz$/.test(url.hostname)||url.hostname==='hacc-decided.ti-ukraine.org',documentHash:createHash('sha256').update(bytes).digest('hex'),checkedAt:new Date().toISOString()});
  }
  return {...seed.factcheck,evidence,discrepancy:true,confirmed:true,kind:'fact',paraphrase:false};
 }

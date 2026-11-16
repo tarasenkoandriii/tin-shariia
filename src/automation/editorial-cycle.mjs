@@ -31,7 +31,9 @@ export function validateCycleOutput(stage, output, artifacts, policy) {
     if (output.kind !== 'fact' || output.paraphrase !== false || output.confirmed !== true
       || !['false','missing_context','partially_confirmed'].includes(output.verdict)
       || !Array.isArray(output.evidence) || output.evidence.length < 2
-      || !output.evidence.some(e => e.primary === true)
+      || !(output.evidence.some(e => e.primary === true)
+        || (output.verdict === 'missing_context'
+          && new Set(output.evidence.map(e => new URL(e.url).hostname)).size >= 2))
       || !output.evidence.every(e => /^https:\/\//.test(e.url??'') && typeof e.excerpt === 'string' && e.excerpt.trim())) fail('CYCLE_EVIDENCE_REQUIRED');
     if (!Number.isFinite(output.startMs) || !Number.isFinite(output.endMs)
       || output.startMs < 0 || output.endMs <= output.startMs || output.endMs-output.startMs > 30000) fail('CYCLE_QUOTE_INVALID');
@@ -68,12 +70,13 @@ export function validateCycleOutput(stage, output, artifacts, policy) {
   if (stage === 'comment') {
     if (output.sourceVideoId !== source.videoId || output.shortVideoId !== artifacts.upload.youtubeId
       || output.channelId !== policy.ownChannelId || !output.commentId
-      || !output.trackingToken || !/^https:\/\/(share\.google|is\.gd|v\.gd|tinyurl\.com)\//.test(output.shortLink??'')
-      || output.trackingVerified !== true) fail('CYCLE_COMMENT_INVALID');
+      || !((output.linkMode==='direct' && output.shortLink==='youtube.com/shorts/'+artifacts.upload.youtubeId)
+        || (output.trackingToken && /^https:\/\/(share\.google|is\.gd|v\.gd|tinyurl\.com)\//.test(output.shortLink??'') && output.trackingVerified===true))) fail('CYCLE_COMMENT_INVALID');
   }
   if (stage === 'visibility') {
     if (output.commentId !== artifacts.comment.commentId || output.reloaded !== true
-      || output.visible !== true || output.linkPresent !== true || !output.screenshotPath) fail('CYCLE_COMMENT_NOT_VISIBLE');
+      || output.visible !== true || output.linkPresent !== true
+      || !(output.screenshotPath || output.verificationMethod==='incognito-reload')) fail('CYCLE_COMMENT_NOT_VISIBLE');
   }
   return output;
 }

@@ -116,3 +116,22 @@ test('unconfirmed source advances to another candidate without generating a vide
  assert.deepEqual(next.artifacts.checkedSources,[{videoId:sourceVideoId,code:'NO_CONFIRMED_DISCREPANCY'}]);
  assert.equal(next.artifacts.discover,undefined);assert.equal(next.artifacts.render,undefined);
 });
+
+test('context review accepts two verified publication hosts, while false verdict still needs a primary source',()=>{
+ const o=outputs(), evidence=o.factcheck.evidence.map(e=>({...e,primary:false}));
+ const context={...o.factcheck,verdict:'missing_context',evidence};
+ assert.doesNotThrow(()=>validateCycleOutput('factcheck',context,o,policy));
+ assert.throws(()=>validateCycleOutput('factcheck',{...context,verdict:'false'},o,policy),/EVIDENCE_REQUIRED/);
+ const repeated=evidence.map(e=>({...e,url:'https://example.org/doc'}));
+ assert.throws(()=>validateCycleOutput('factcheck',{...context,evidence:repeated},o,policy),/EVIDENCE_REQUIRED/);
+});
+
+test('direct source promotion validates the exact published Short and reload proof',()=>{
+ const o=outputs();
+ const comment={sourceVideoId,shortVideoId:o.upload.youtubeId,channelId:ownChannelId,commentId:'comment',shortLink:'youtube.com/shorts/'+o.upload.youtubeId,linkMode:'direct'};
+ assert.doesNotThrow(()=>validateCycleOutput('comment',comment,o,policy));
+ assert.throws(()=>validateCycleOutput('comment',{...comment,shortLink:'youtube.com/shorts/wrong'},o,policy),/COMMENT_INVALID/);
+ const proof={commentId:'comment',visible:true,reloaded:true,linkPresent:true,verificationMethod:'incognito-reload'};
+ assert.doesNotThrow(()=>validateCycleOutput('visibility',proof,{...o,comment},policy));
+ assert.throws(()=>validateCycleOutput('visibility',{...proof,reloaded:false},{...o,comment},policy),/COMMENT_NOT_VISIBLE/);
+});

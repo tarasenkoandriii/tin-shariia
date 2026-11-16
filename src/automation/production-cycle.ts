@@ -1,3 +1,4 @@
+import {cycleCommentHandlers} from './cycle-comments.mjs';
 import {createHash} from 'node:crypto';
 import type {z} from 'zod';
 import {cycleSeedSchema} from './cycle-input.mjs';
@@ -32,6 +33,7 @@ const certain=(code:string)=>Object.assign(Error(code),{beforeSend:true});
 export function productionCycleHandlers(db:DB,identity:string) {
  return {
   ...projectSourceHandlers(db,identity),
+  ...cycleCommentHandlers(db,identity),
   async factcheck({job,policy}:Data) {
    if(!policy.seed?.editorVerified)throw certain('CYCLE_EDITORIAL_CASE_REQUIRED');
    const {rows:[task]}=await db.query("SELECT * FROM editorial_cycle_media_tasks WHERE cycle_id=$1 AND kind='evidence'",[job.id]);
@@ -104,7 +106,7 @@ export function productionCycleHandlers(db:DB,identity:string) {
    if(['queued','running'].includes(queued.status)){await dispatchSources();return wait('CYCLE_VIDEO_AUDIT_PENDING');}
    if(queued.status!=='succeeded')throw certain('CYCLE_VIDEO_AUDIT_FAILED');
    const {rows:[audit]}=await db.query('SELECT * FROM prepublication_audits WHERE job_id=$1 AND attempt=$2',[queued.id,queued.attempt]);
-   const {rows:findings}=await db.query('SELECT * FROM audit_findings WHERE job_id=$1 AND attempt=$2',[queued.id,queued.attempt]);
+   const {rows:findings}=await db.query('SELECT f.* FROM audit_findings f LEFT JOIN audit_finding_reviews r ON r.job_id=f.job_id AND r.attempt=f.attempt AND r.position=f.position WHERE f.job_id=$1 AND f.attempt=$2 AND r.position IS NULL',[queued.id,queued.attempt]);
    if(!audit||findings.length)throw certain('CYCLE_AUDIT_FINDINGS_OPEN');
    await reviewVideoAudit(db,identity,episodeId,mediaId,{action:'approve'});
    return {mediaHash,passed:true,unresolvedFindings:0,editingScore:audit.editing_score,jobId:queued.id};
