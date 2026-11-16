@@ -1,3 +1,4 @@
+import {burnQuoteSubtitles} from '../src/media/quote-subtitles.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readFile,writeFile,mkdir,access} from 'node:fs/promises';
@@ -40,8 +41,9 @@ async function render(task,dir){
  const quote=join(dir,'quote.mp4');
  if(!await exists(quote)) {
   const lines=[];for(const word of String(input.quoteCaption??'').split(/\s+/)){const last=lines.at(-1);if(last&&last.length+word.length<39)lines[lines.length-1]+=' '+word;else lines.push(word);}
-  const captions=lines.slice(0,5).map((l,i)=>`<text x="360" y="${970+i*43}" text-anchor="middle" fill="#fff" font-family="Arial" font-size="30">${xml(l)}</text>`).join('');
-  const banner=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect x="32" y="95" width="656" height="128" rx="22" fill="#102633"/><text x="360" y="147" text-anchor="middle" fill="#77e0cf" font-family="Arial" font-weight="bold" font-size="36">${xml(String(meta.channel??meta.uploader??'Джерело').slice(0,24)+' · відеоцитата')}</text><text x="360" y="196" text-anchor="middle" fill="#fff" font-family="Arial" font-size="27">${xml(input.quoteLabel??'Оригінальний звук · швидкість 1×')}</text><rect x="25" y="915" width="670" height="300" rx="24" fill="#102633" fill-opacity="0.9"/>${captions}</svg>`);
+  const quoteUrl=input.manifest.quoteSource?.url??('youtube.com/watch?v='+input.videoId);
+  const quoteTime=input.manifest.quoteSource?.timeRange??(Math.floor(input.startMs/60000)+':'+String(Math.floor(input.startMs/1000)%60).padStart(2,'0'));
+  const banner=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect x="36" y="270" width="648" height="100" rx="18" fill="#102633"/><text x="360" y="309" text-anchor="middle" fill="#77e0cf" font-family="Arial" font-weight="bold" font-size="27">${xml(String(meta.channel??meta.uploader??'Джерело').slice(0,24)+' · відеоцитата')}</text><text x="360" y="345" text-anchor="middle" fill="#fff" font-family="Arial" font-size="18">${xml(quoteUrl+' · '+quoteTime)}</text></svg>`);
   const overlay=join(dir,'quote-overlay.png');await sharp(banner).png().toFile(overlay);
   await invoke('ffmpeg',['-v','error','-nostdin','-n','-i',source,'-i',overlay,'-filter_complex',
    '[0:v]split=2[b][f];[b]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,gblur=sigma=25[bg];[f]scale=720:-2[fg];[bg][fg]overlay=0:(H-h)/2[base];[base][1:v]overlay=0:0,setsar=1,fps=30[v]',
@@ -57,11 +59,17 @@ async function render(task,dir){
  const assets=photos.map(p=>({...p,path:'assets/'+p.path,tags:[...p.tags,'verdict']}));
  for(const [i,card] of (input.manifest.documentCards??[]).entries()) {
   const p='document-'+i+'.png';
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="760"><rect width="1000" height="760" rx="25" fill="#f5f1e6"/><rect x="35" y="30" width="930" height="700" rx="15" fill="none" stroke="#ddad46" stroke-width="5"/><text x="70" y="115" font-family="Arial" font-size="38" font-weight="bold" fill="#102633">${xml(card.title)}</text>${card.lines.map((l,n)=>`<text x="70" y="${210+n*66}" font-family="Arial" font-size="30" fill="#163345">${xml(l)}</text>`).join('')}<text x="70" y="700" font-family="Arial" font-size="23" fill="#496471">${xml(card.credit)}</text></svg>`;
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600"><rect width="1000" height="600" rx="25" fill="#f5f1e6"/><rect x="35" y="30" width="930" height="540" rx="15" fill="none" stroke="#ddad46" stroke-width="5"/><text x="70" y="115" font-family="Arial" font-size="38" font-weight="bold" fill="#102633">${xml(card.title)}</text>${card.lines.map((l,n)=>`<text x="70" y="${210+n*90}" font-family="Arial" font-size="52" fill="#163345">${xml(l)}</text>`).join('')}<text x="70" y="560" font-family="Arial" font-size="23" fill="#496471">${xml(card.credit)}</text></svg>`;
   await sharp(Buffer.from(svg)).png().toFile(join(assetDir,p));
   assets.push({path:'assets/'+p,kind:'document',tags:card.tags,credit:card.credit,sourceUrl:card.sourceUrl});
  }
- const manifest={sourceLabel:input.manifest.sourceLabel,visualEffect:input.manifest.visualEffect,quote:{path:'quote.mp4'},
+ let quotePath='quote.mp4';
+ if(input.manifest.quoteSubtitles?.length){
+  const translated=join(dir,'quote-uk.mp4');
+  if(!await exists(translated))await burnQuoteSubtitles(quote,translated,input.manifest.quoteSubtitles,dir);
+  quotePath='quote-uk.mp4';
+ }
+ const manifest={sourceLabel:input.manifest.sourceLabel,visualEffect:input.manifest.visualEffect,quote:{path:quotePath},
   narration:{...narration,path:'maya.mp3',base64:undefined},assets,scenes:input.manifest.scenes};
  const manifestPath=join(dir,'montage.json');await writeFile(manifestPath,JSON.stringify(manifest,null,2));
  const authored=join(dir,'authored.mp4');
